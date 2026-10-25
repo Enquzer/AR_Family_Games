@@ -9,7 +9,6 @@ import * as THREE from '/vendor/three/three.module.js';
 import { BaseGame } from './base.js';
 import { buildTrack } from '../engine/environments.js';
 import { Avatar } from '../engine/avatar.js';
-import { createRiggedAvatar } from '../engine/riggedModel.js';
 import { clamp, damp } from '../shared/math.js';
 
 const LANE_COUNT = 4;
@@ -398,25 +397,9 @@ export class TrackGame extends BaseGame {
         baseSpeed: template.baseSpeed,
         accel: template.accel,
         avatar: botAvatar,
-        rigged: null,
         lane,
         motion: { cadence: 0, steps: 0 },
       };
-
-      // Seamlessly instantiate the 3D rigged character for Olympic competitor bots
-      createRiggedAvatar({
-        scene: this.env.scene,
-        color: template.color,
-        height: 1.85,
-        facing: Math.PI / 2,
-        autoPlay: true,
-      })
-        .then((rigged) => {
-          if (!rigged) return;
-          bot.rigged = rigged;
-          botAvatar.setVisible(false);
-        })
-        .catch(() => {});
 
       this.bots.push(bot);
       this.laneAssignments.set(bot.key, lane);
@@ -869,12 +852,6 @@ export class TrackGame extends BaseGame {
         c.avatar.facing = Math.PI / 2;
         c.avatar.facingTarget = Math.PI / 2;
 
-        if (c.rigged) {
-          c.rigged.setPosition(s.x, botJumpY, s.laneZ);
-          c.rigged.setFacing(this.phase === 'podium' ? 0 : Math.PI / 2);
-          c.rigged.setSpeed(clamp(s.speed / 4.5, 0.4, 2.5));
-          c.rigged.update(dt);
-        }
       }
 
       s.topSpeed = Math.max(s.topSpeed, s.speed);
@@ -1155,10 +1132,6 @@ export class TrackGame extends BaseGame {
   dispose() {
     window.removeEventListener('keydown', this.onKey);
     for (const b of this.bots) {
-      if (b.rigged) {
-        b.rigged.dispose();
-        b.rigged = null;
-      }
       if (b.avatar) b.avatar.dispose();
     }
     this.bots = [];

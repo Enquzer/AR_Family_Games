@@ -16,7 +16,6 @@ import * as THREE from '/vendor/three/three.module.js';
 import { BaseGame } from './base.js';
 import { buildArena } from '../engine/environments.js';
 import { Avatar } from '../engine/avatar.js';
-import { createRiggedAvatar } from '../engine/riggedModel.js';
 import { clamp, damp, lerp } from '../shared/math.js';
 
 const MAX_HP = 100;
@@ -186,7 +185,6 @@ export class BoxingGame extends BaseGame {
     } else if (mode === 'against' && this.fighters[1]?.isBot) {
       // Player 2 takes over opponent corner from bot
       if (this.bot) this.bot.setVisible(false);
-      if (this.bot?._rigged) this.bot._rigged.setVisible(false);
       this.fighters[1] = this.#makeFighter(p, 1);
       this.fighters[1].isBot = false;
       this.message = '1V1 MATCH!';
@@ -247,22 +245,8 @@ export class BoxingGame extends BaseGame {
     const avatar = new Avatar({ name: 'IRON BOT', color: '#94a3b8', id: 'bot' });
     avatar.setProp('gloves');
     avatar.setOnline(true);
+    avatar.setVisible(true);
     this.scene.add(avatar.group);
-
-    createRiggedAvatar({
-      scene: this.scene,
-      color: '#94a3b8',
-      height: 1.95,
-      facing: 0,
-      autoPlay: true,
-    })
-      .then((rigged) => {
-        if (!rigged) return;
-        avatar._rigged = rigged;
-        avatar.setVisible(false);
-      })
-      .catch(() => {});
-
     return avatar;
   }
 
@@ -609,16 +593,52 @@ export class BoxingGame extends BaseGame {
         f.avatar.group.rotation.z = f.recoil.rotZ;
         f.avatar.facingTarget = facing;
         f.avatar.seated = false;
-        f.avatar.update(null, null, dt, { active: false });
+
+        // Dynamic boxing kinematics for Iron Bot
+        const isKO = f.hp <= 0;
+        const isGuarding = f.blocking > 0.5;
+        const isWindup = this.botState === 'windup';
+        const isStrike = this.botState === 'strike';
+
+        const botPoseTargets = isKO
+          ? {
+              wrL: new THREE.Vector3(-0.25, 0.45, 0),
+              wrR: new THREE.Vector3(0.25, 0.45, 0),
+            }
+          : isGuarding
+          ? {
+              wrL: new THREE.Vector3(-0.08, 1.55, 0.38),
+              wrR: new THREE.Vector3(0.08, 1.55, 0.38),
+              elL: new THREE.Vector3(-0.14, 1.25, 0.25),
+              elR: new THREE.Vector3(0.14, 1.25, 0.25),
+            }
+          : isWindup
+          ? {
+              wrL: new THREE.Vector3(-0.16, 1.48, 0.32),
+              wrR: new THREE.Vector3(0.35, 1.45, -0.1),
+              elR: new THREE.Vector3(0.38, 1.25, -0.2),
+            }
+          : isStrike
+          ? {
+              wrL: new THREE.Vector3(-0.16, 1.45, 0.3),
+              wrR: new THREE.Vector3(0.06, 1.52, 0.88),
+              elR: new THREE.Vector3(0.14, 1.38, 0.45),
+            }
+          : {
+              wrL: new THREE.Vector3(-0.18, 1.48 + Math.sin(this.time * 4) * 0.02, 0.32),
+              wrR: new THREE.Vector3(0.18, 1.45 - Math.sin(this.time * 4) * 0.02, 0.28),
+              elL: new THREE.Vector3(-0.24, 1.20, 0.15),
+              elR: new THREE.Vector3(0.24, 1.18, 0.12),
+            };
+
+        f.avatar.update(null, null, dt, {
+          active: false,
+          poseTargets: botPoseTargets,
+          poseLambda: isStrike ? 24 : 12,
+        });
 
         if (f.avatar.headGroup && f.hp > 25) {
           f.avatar.headGroup.rotation.x = damp(f.avatar.headGroup.rotation.x, 0, 11, dt);
-        }
-
-        if (f.avatar._rigged) {
-          f.avatar._rigged.setPosition(posX, posY, posZ);
-          f.avatar._rigged.setFacing(facing + f.recoil.rotY);
-          f.avatar._rigged.update(dt);
         }
       }
 
@@ -1043,10 +1063,6 @@ export class BoxingGame extends BaseGame {
 
   dispose() {
     window.removeEventListener('keydown', this.onKey);
-    if (this.bot?._rigged) {
-      this.bot._rigged.dispose();
-      this.bot._rigged = null;
-    }
     if (this.bot) this.bot.dispose();
     if (this.fpGroup) {
       this.fpGroup.removeFromParent();

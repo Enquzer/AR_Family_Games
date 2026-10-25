@@ -369,17 +369,25 @@ export class DanceGame extends BaseGame {
         .then(res => res.ok ? res.json() : null)
         .then(async data => {
           if (!data || !Array.isArray(data.moves)) return;
+          const discovered = [];
           for (const filename of data.moves) {
             try {
               const mRes = await fetch(`/assets/dance/moves/${filename}`);
               if (mRes.ok) {
                 const moveData = await mRes.json();
                 moveData.useBakedFrames = true;
-                if (!this.moves.some(m => m.id === moveData.id)) {
-                  this.moves.unshift(moveData);
-                }
+                discovered.push(moveData);
               }
             } catch {}
+          }
+          if (discovered.length > 0) {
+            const existingIds = new Set(discovered.map(m => m.id));
+            const remaining = this.moves.filter(m => !existingIds.has(m.id));
+            this.moves = [...discovered, ...remaining];
+            if (this.phase === 'waiting' || this.phase === 'intro') {
+              this.currentMove = this.moves[0];
+              this.bpm = this.currentMove.bpm;
+            }
           }
         })
         .catch(() => {});
@@ -402,14 +410,45 @@ export class DanceGame extends BaseGame {
     this.cameraFlashes = [];
     this.winner = null;
 
-    // Key listener for rematch / space
+    // Key listener for rematch / space, shuffle (S), and skip move (M)
     this.onKey = (e) => {
       if (e.target.tagName === 'INPUT') return;
       if (e.code === 'Space' && (this.phase === 'results' || this.phase === 'podium')) {
         this.#beginRoutine();
+      } else if (e.key === 's' || e.key === 'S') {
+        this.shuffleMoves();
+      } else if (e.key === 'm' || e.key === 'M') {
+        this.#skipToNextMove();
       }
     };
     window.addEventListener('keydown', this.onKey);
+  }
+
+  shuffleMoves() {
+    for (let i = this.moves.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.moves[i], this.moves[j]] = [this.moves[j], this.moves[i]];
+    }
+    this.moveIndex = 0;
+    this.currentMove = this.moves[0];
+    this.bpm = this.currentMove.bpm;
+    this.moveStartTime = Math.max(0, this.time - this.routineStart);
+    this.message = this.currentMove.name;
+    this.messageSub = `SHUFFLED · ${this.currentMove.tip}`;
+    this.ctx.audio?.play?.('beat', { accent: true });
+  }
+
+  #skipToNextMove() {
+    if (this.phase !== 'dance') return;
+    const nextIdx = (this.moveIndex + 1) % this.moves.length;
+    this.prevMove = this.moves[this.moveIndex];
+    this.moveIndex = nextIdx;
+    this.currentMove = this.moves[nextIdx];
+    this.bpm = this.currentMove.bpm;
+    this.moveStartTime = Math.max(0, this.time - this.routineStart);
+    this.message = this.currentMove.name;
+    this.messageSub = `${this.bpm} BPM · ${this.currentMove.tip}`;
+    this.ctx.audio?.play?.('go');
   }
 
   buildWorld() {
@@ -423,10 +462,8 @@ export class DanceGame extends BaseGame {
     this.coach.facing = 0;
     this.coach.facingTarget = 0;
     this.coach.setOnline(true);
+    this.coach.setVisible(true);
     scene.add(this.coach.group);
-
-    // Optional Rigged 3D Model support: GLB/GLTF or Mixamo FBX (e.g. coach.glb, coach.fbx, Excited.fbx)
-    this.#loadCustomCoach(scene);
 
     // Dedicated overhead follow spotlight on the Coach
     const coachSpot = new THREE.SpotLight(0xf472b6, 38, 16, Math.PI / 5, 0.45);
@@ -437,83 +474,6 @@ export class DanceGame extends BaseGame {
 
     // 22 Arena Paparazzi Camera Flashes
     this.cameraFlashes = this.#createCameraFlashes(scene);
-  }
-
-  async #loadCustomCoach(scene) {
-    // 1. Try GLTF/GLB (/models/coach.glb)
-    try {
-      const { GLTFLoader } = await import('/vendor/three/GLTFLoader.js');
-      const loader = new GLTFLoader();
-      loader.load(
-        '/models/coach.glb',
-        (gltf) => {
-          if (!gltf || !gltf.scene) return;
-          this.#setupCustomCoachModel(scene, gltf.scene, gltf.animations, 1.18);
-        },
-        undefined,
-        () => {
-          // GLB not found, fallback to checking FBX
-          this.#loadFBXCoach(scene);
-        }
-      );
-    } catch {
-      this.#loadFBXCoach(scene);
-    }
-  }
-
-  async #loadFBXCoach(scene) {
-    try {
-      const { FBXLoader } = await import('/vendor/three/FBXLoader.js');
-      const loader = new FBXLoader();
-      const candidates = ['/models/coach.fbx', '/models/Excited.fbx'];
-
-      const tryCandidate = (idx) => {
-        if (idx >= candidates.length) return;
-        loader.load(
-          candidates[idx],
-          (fbx) => {
-            if (!fbx) return;
-            // Measure bounding box to normalize FBX (Mixamo cm) to ~2.05m tall
-            const box = new THREE.Box3().setFromObject(fbx);
-            const size = new THREE.Vector3();
-            box.getSize(size);
-            const scale = size.y > 0 ? 2.05 / size.y : 0.0118;
-            this.#setupCustomCoachModel(scene, fbx, fbx.animations, scale);
-          },
-          undefined,
-          () => tryCandidate(idx + 1)
-        );
-      };
-
-      tryCandidate(0);
-    } catch (err) {
-      // Fallback silently to built-in FemaleCoachAvatar
-    }
-  }
-
-  #setupCustomCoachModel(scene, model, animations, scaleFactor = 1.0) {
-    if (!model) return;
-    this.coach.setVisible(false);
-    this.customModel = model;
-    this.customModel.position.copy(this.coachHome);
-    this.customModel.scale.setScalar(scaleFactor);
-    this.customModel.rotation.y = 0; // face toward front audience
-
-    this.customModel.traverse((child) => {
-      if (child.isMesh || child.isSkinnedMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
-    });
-
-    scene.add(this.customModel);
-
-    if (animations && animations.length > 0) {
-      this.animMixer = new THREE.AnimationMixer(this.customModel);
-      const clip = animations.find((a) => a.tracks && a.tracks.length > 0) || animations[0];
-      const action = this.animMixer.clipAction(clip);
-      action.play();
-    }
   }
 
   #createCameraFlashes(scene) {
@@ -636,9 +596,6 @@ export class DanceGame extends BaseGame {
 
     // Step continuous full-body dance kinematics for the Coach
     this.#updateCoachKinematics(dt, localTime);
-    if (this.animMixer) {
-      this.animMixer.update(dt * (this.bpm / 120));
-    }
 
     // Track real-time motion frames for players
     if (this.phase === 'dance') {
@@ -1177,11 +1134,6 @@ export class DanceGame extends BaseGame {
 
   dispose() {
     window.removeEventListener('keydown', this.onKey);
-    if (this.customModel) {
-      this.customModel.removeFromParent();
-      this.customModel = null;
-    }
-    this.animMixer = null;
     if (this.coach) {
       this.coach.dispose();
       this.coach = null;

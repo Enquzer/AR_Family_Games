@@ -16,7 +16,6 @@ import * as THREE from '/vendor/three/three.module.js';
 import { BaseGame } from './base.js';
 import { buildCourt } from '../engine/environments.js';
 import { Avatar } from '../engine/avatar.js';
-import { createRiggedAvatar } from '../engine/riggedModel.js';
 import { clamp, damp, rand } from '../shared/math.js';
 
 const G = 9.81;
@@ -229,20 +228,6 @@ export class TennisGame extends BaseGame {
       this.botAvatar.setOnline(true);
       this.scene.add(this.botAvatar.group);
       this.bot = true;
-
-      createRiggedAvatar({
-        scene: this.scene,
-        color: '#38bdf8',
-        height: 1.85,
-        facing: -Math.PI / 2,
-        autoPlay: true,
-      })
-        .then((rigged) => {
-          if (!rigged) return;
-          this.botAvatar._rigged = rigged;
-          this.botAvatar.setVisible(false);
-        })
-        .catch(() => {});
     }
 
     this.sides.forEach((p, i) => {
@@ -262,7 +247,6 @@ export class TennisGame extends BaseGame {
     if (mode === 'against' && (!this.sides[1] || this.bot)) {
       this.sides[1] = p;
       if (this.botAvatar) this.botAvatar.setVisible(false);
-      if (this.botAvatar?._rigged) this.botAvatar._rigged.setVisible(false);
       this.bot = false;
       this.place(p, 8.2, 0, { facing: -Math.PI / 2 });
     } else if (this.sides[0] && p !== this.sides[0] && p !== this.sides[1]) {
@@ -534,12 +518,6 @@ export class TennisGame extends BaseGame {
     this.botAvatar.group.position.set(8.2, 0, this.botZ);
     this.botAvatar.facingTarget = -Math.PI / 2;
     this.botAvatar.update(null, null, dt, { active: false });
-
-    if (this.botAvatar._rigged) {
-      this.botAvatar._rigged.setPosition(8.2, 0, this.botZ);
-      this.botAvatar._rigged.setFacing(-Math.PI / 2);
-      this.botAvatar._rigged.update(dt);
-    }
 
     this.aiCooldown -= dt;
     if (this.phase === 'rally' && this.ball.pos.x > 0 && this.aiCooldown <= 0) {
@@ -831,10 +809,6 @@ export class TennisGame extends BaseGame {
 
   dispose() {
     window.removeEventListener('keydown', this.onKey);
-    if (this.botAvatar?._rigged) {
-      this.botAvatar._rigged.dispose();
-      this.botAvatar._rigged = null;
-    }
     if (this.botAvatar) this.botAvatar.dispose();
     this.racketGroup?.removeFromParent();
     for (const cf of this.cameraFlashes) {
