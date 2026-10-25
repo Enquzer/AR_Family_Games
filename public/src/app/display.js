@@ -34,6 +34,58 @@ const net = new NetClient({ room, role: 'display', name: 'TV' });
 let menu = null;
 let game = null;
 let calibration = defaultCalibration();
+calibration.cameraOffset = 0.0;
+calibration.reachGain = 1.55;
+
+function loadCalibrationOffset() {
+  try {
+    const saved = localStorage.getItem('ar_family_calibration_offset');
+    if (saved) {
+      const data = JSON.parse(saved);
+      if (typeof data.cameraOffset === 'number') calibration.cameraOffset = data.cameraOffset;
+      if (typeof data.reachGain === 'number') calibration.reachGain = data.reachGain;
+    }
+  } catch {}
+}
+
+function saveCalibrationOffset() {
+  try {
+    localStorage.setItem(
+      'ar_family_calibration_offset',
+      JSON.stringify({
+        cameraOffset: calibration.cameraOffset ?? 0,
+        reachGain: calibration.reachGain ?? 1.55,
+      })
+    );
+  } catch {}
+}
+
+loadCalibrationOffset();
+
+function recalibrateReach() {
+  let targetP = null;
+  for (const p of players.values()) {
+    if (p.lm && performance.now() - p.lastSeen < 1200) {
+      targetP = p;
+      break;
+    }
+  }
+
+  if (targetP && targetP.lm && targetP.lm[11] && targetP.lm[12]) {
+    const shX = (targetP.lm[11].x + targetP.lm[12].x) / 2;
+    const mirror = calibration.mirror !== false;
+    const mirrorSh = mirror ? 1 - shX : shX;
+    calibration.cameraOffset = clamp((0.5 - mirrorSh) * 0.35, -0.28, 0.28);
+    saveCalibrationOffset();
+    audio.play('bell');
+    toast(`🎯 Reach Re-Centered (Offset: ${(calibration.cameraOffset * 100).toFixed(0)}%)`);
+  } else {
+    calibration.cameraOffset = 0.0;
+    saveCalibrationOffset();
+    audio.play('tick');
+    toast('🎯 Reach Calibration Reset');
+  }
+}
 let sim = null;
 let lastHudAt = 0;
 let lastStateAt = 0;
@@ -114,7 +166,13 @@ function joinPlayer(p, opts = {}) {
   if (!p.joined) {
     p.joined = true;
     p.avatar.setVisible(true);
-    if (game && !game.players?.includes(p)) game.addPlayer(p);
+    if (game && !game.players?.includes(p)) {
+      if (game.players?.length >= 1) {
+        promptPlayer2Join(p);
+      } else {
+        game.addPlayer(p);
+      }
+    }
     updateAttractPlayers();
     if (!opts.silent) {
       toast(`${p.name} joined 👋`);
@@ -125,7 +183,11 @@ function joinPlayer(p, opts = {}) {
       }
     }
   } else if (game && !game.players?.includes(p)) {
-    game.addPlayer(p);
+    if (game.players?.length >= 1) {
+      promptPlayer2Join(p);
+    } else {
+      game.addPlayer(p);
+    }
   }
 }
 
@@ -240,12 +302,28 @@ function startGame(gameId, options = {}) {
   lastHudAt = 0;
   lastStateAt = 0;
   hudCacheKey = '';
+
+  const mainPlayer = players.get(playerOrder[0]);
+  if (HAND_PROMPT_GAMES.includes(gameId) && mainPlayer) {
+    promptDominantHand(mainPlayer, gameId);
+  }
 }
 
 function stopGame(showMenu = true) {
   if (!game) return;
   const old = game;
   game = null;
+
+  isGamePaused = false;
+  dominantHandCalibrating = false;
+  pendingPlayer2Join = null;
+  const pauseModal = $('#pause-modal');
+  if (pauseModal) pauseModal.hidden = true;
+  const joinModal = $('#player-join-modal');
+  if (joinModal) joinModal.hidden = true;
+  const handModal = $('#dominant-hand-modal');
+  if (handModal) handModal.hidden = true;
+
   try {
     old.dispose();
   } catch (err) {
@@ -276,6 +354,139 @@ function stopGame(showMenu = true) {
       viewBadge.classList.remove('ok');
     }
     if (sim) sim.setScenario('menu');
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Kinect Features: Dominant Hand, Pause, Mid-Game Drop-In            */
+/* ------------------------------------------------------------------ */
+
+let isGamePaused = false;
+let dominantHandCalibrating = false;
+let pendingPlayer2Join = null;
+
+const HAND_PROMPT_GAMES = ['tennis', 'bowling', 'balling', 'archery'];
+
+function promptDominantHand(player, gameId, onSelected) {
+  if (!player) return;
+  dominantHandCalibrating = true;
+  const modal = $('#dominant-hand-modal');
+  if (!modal) return;
+  modal.hidden = false;
+
+  const cardL = $('#hand-opt-left');
+  const cardR = $('#hand-opt-right');
+
+  const cleanUp = () => {
+    dominantHandCalibrating = false;
+    modal.hidden = true;
+    cardL?.classList.remove('active', 'locked');
+    cardR?.classList.remove('active', 'locked');
+  };
+
+  const selectHand = (hand) => {
+    player.dominantHand = hand;
+    const propName = gameId === 'tennis' ? 'racket' : (gameId === 'bowling' || gameId === 'balling') ? 'ball' : 'none';
+    player.avatar.setProp(propName, hand);
+    audio.play('bell');
+    toast(`✓ ${hand === 'L' ? 'LEFT' : 'RIGHT'} HAND SELECTED`);
+    cleanUp();
+    if (onSelected) onSelected(hand);
+  };
+
+  if (cardL) cardL.onclick = () => selectHand('L');
+  if (cardR) cardR.onclick = () => selectHand('R');
+}
+
+function updateDominantHandCalibration(player) {
+  if (!dominantHandCalibrating || !player || !player.motion) return;
+  const s = player.motion.state;
+  const ringL = $('#reach-ring-left');
+  const ringR = $('#reach-ring-right');
+  const cardL = $('#hand-opt-left');
+  const cardR = $('#hand-opt-right');
+
+  const progL = s.dominantProgress?.L || 0;
+  const progR = s.dominantProgress?.R || 0;
+
+  if (ringL) ringL.style.strokeDashoffset = `${264 * (1 - progL)}`;
+  if (ringR) ringR.style.strokeDashoffset = `${264 * (1 - progR)}`;
+
+  cardL?.classList.toggle('active', progL > 0.15);
+  cardR?.classList.toggle('active', progR > 0.15);
+
+  if (s.dominantCandidate) {
+    const choice = s.dominantCandidate;
+    (choice === 'L' ? cardL : cardR)?.classList.add('locked');
+    setTimeout(() => {
+      const card = $(choice === 'L' ? '#hand-opt-left' : '#hand-opt-right');
+      card?.click();
+    }, 180);
+  }
+}
+
+function toggleGamePause(forceState) {
+  if (!game) return;
+  isGamePaused = forceState !== undefined ? forceState : !isGamePaused;
+  game.isPaused = isGamePaused;
+  const modal = $('#pause-modal');
+  if (modal) modal.hidden = !isGamePaused;
+
+  if (isGamePaused) {
+    audio.play('whistle');
+    const statsEl = $('#pause-stats');
+    if (statsEl) {
+      statsEl.innerHTML = `<p><strong>${game.title || 'MATCH'}</strong></p><p>${game.message || ''} ${game.messageSub || ''}</p>`;
+    }
+  } else {
+    audio.play('go');
+  }
+}
+
+function promptPlayer2Join(p2) {
+  if (!game) return;
+  pendingPlayer2Join = p2;
+  const modal = $('#player-join-modal');
+  if (!modal) return;
+  const nameEl = $('#join-p2-name');
+  if (nameEl) nameEl.textContent = p2.name || 'PLAYER 2';
+  modal.hidden = false;
+  audio.play('bell');
+
+  const cardAgainst = $('#opt-join-against');
+  const cardWith = $('#opt-join-with');
+  const btnDismiss = $('#btn-join-dismiss');
+
+  const resolve = (mode) => {
+    modal.hidden = true;
+    pendingPlayer2Join = null;
+    cardAgainst?.classList.remove('active');
+    cardWith?.classList.remove('active');
+
+    if (mode === 'dismiss') {
+      p2.avatar.setVisible(false);
+      toast(`👁 ${p2.name} is spectating`);
+      return;
+    }
+    game.addPlayer(p2, mode);
+    audio.play('cheer');
+    toast(`🎮 ${p2.name} joined (${mode === 'against' ? 'VS Match' : 'Co-Op Team'})!`);
+  };
+
+  if (cardAgainst) cardAgainst.onclick = () => resolve('against');
+  if (cardWith) cardWith.onclick = () => resolve('with');
+  if (btnDismiss) btnDismiss.onclick = () => resolve('dismiss');
+}
+
+function updatePlayer2JoinGestures(p2) {
+  if (!pendingPlayer2Join || !p2 || !p2.motion) return;
+  const s = p2.motion.state;
+  if (s.reachForwardL > 0.32 && s.reachForwardL > s.reachForwardR + 0.14) {
+    $('#opt-join-against')?.classList.add('active');
+    setTimeout(() => $('#opt-join-against')?.click(), 250);
+  } else if (s.reachForwardR > 0.32 && s.reachForwardR > s.reachForwardL + 0.14) {
+    $('#opt-join-with')?.classList.add('active');
+    setTimeout(() => $('#opt-join-with')?.click(), 250);
   }
 }
 
@@ -660,11 +871,12 @@ function updateHandMenu(dt, now) {
   for (const p of players.values()) {
     if (!p.lm || now - p.lastSeen > 1200) continue;
     const lm = p.lm;
-    const sy = ((lm[11]?.y ?? 0.5) + (lm[12]?.y ?? 0.5)) / 2;
+    const hipY = ((lm[23]?.y ?? 0.65) + (lm[24]?.y ?? 0.65)) / 2;
     const lWrist = lm[15];
     const rWrist = lm[16];
-    const lUp = lWrist && (lWrist.visibility ?? 1) > 0.35 && lWrist.y < sy + 0.08;
-    const rUp = rWrist && (rWrist.visibility ?? 1) > 0.35 && rWrist.y < sy + 0.08;
+    // Active if hand is anywhere above hip level (natural reach from waist to head)
+    const lUp = lWrist && (lWrist.visibility ?? 1) > 0.35 && lWrist.y < hipY + 0.05;
+    const rUp = rWrist && (rWrist.visibility ?? 1) > 0.35 && rWrist.y < hipY + 0.05;
 
     let candidate = null;
     if (lUp && rUp) candidate = lWrist.y < rWrist.y ? lWrist : rWrist;
@@ -685,12 +897,29 @@ function updateHandMenu(dt, now) {
     cursorState.lastActiveAt = now;
     cursorState.color = activePlayer.color || '#22d3ee';
 
+    const lm = activePlayer.lm;
+    const lSh = lm ? lm[11] : null;
+    const rSh = lm ? lm[12] : null;
+    const lHip = lm ? lm[23] : null;
+    const rHip = lm ? lm[24] : null;
+    const chestX = lSh && rSh ? (lSh.x + rSh.x) / 2 : 0.5;
+    const chestY = lSh && rSh ? (lSh.y + rSh.y) / 2 : 0.35;
+    const hipY = lHip && rHip ? (lHip.y + rHip.y) / 2 : chestY + 0.3;
+    const shoulderW = lSh && rSh ? Math.max(0.12, Math.abs(lSh.x - rSh.x)) : 0.22;
+    const torsoH = Math.max(0.20, hipY - chestY);
+
     const mirror = calibration.mirror !== false;
-    const rawX = mirror ? 1 - bestHand.x : bestHand.x;
+    const mirrorChestX = mirror ? 1 - chestX : chestX;
+    const mirrorHandX = mirror ? 1 - bestHand.x : bestHand.x;
+    const deltaX = mirrorHandX - mirrorChestX;
+    const reachGain = calibration.reachGain ?? 1.55;
+    const cameraOffset = calibration.cameraOffset ?? 0.0;
+    const normX = deltaX / (shoulderW * 1.25);
+    const reachX = clamp(0.5 + cameraOffset + normX * reachGain * 0.46, 0.015, 0.985) * window.innerWidth;
     
-    // Generous span mapping: [0.22, 0.78] in camera -> [0.03, 0.97] on TV
-    const reachX = clamp((rawX - 0.22) / 0.56, 0.03, 0.97) * window.innerWidth;
-    const reachY = clamp((bestHand.y - 0.16) / 0.54, 0.05, 0.95) * window.innerHeight;
+    // Continuous vertical mapping: head -> top, waist -> bottom
+    const normY = (bestHand.y - (chestY - 0.08)) / (torsoH * 1.15);
+    const reachY = clamp(normY, 0.02, 0.98) * window.innerHeight;
 
     cursorState.targetX = reachX;
     cursorState.targetY = reachY;
@@ -716,8 +945,9 @@ function updateHandMenu(dt, now) {
   cursorEl.style.transform = `translate3d(${cursorState.x}px, ${cursorState.y}px, 0)`;
   cursorEl.style.setProperty('--cursor-color', cursorState.color);
 
-  // 4. Hit-test against interactive targets
+  // 4. Hit-test against interactive targets (distance-prioritized)
   let hitItem = null;
+  let bestDist = Infinity;
   for (const item of targets) {
     const rect = item.el.getBoundingClientRect();
     if (
@@ -728,6 +958,13 @@ function updateHandMenu(dt, now) {
     ) {
       hitItem = item;
       break;
+    }
+    const dx = Math.max(rect.left - cursorState.x, 0, cursorState.x - rect.right);
+    const dy = Math.max(rect.top - cursorState.y, 0, cursorState.y - rect.bottom);
+    const dist = Math.hypot(dx, dy);
+    if (dist <= 24 && dist < bestDist) {
+      bestDist = dist;
+      hitItem = item;
     }
   }
 
@@ -949,13 +1186,38 @@ function frame(now) {
     drawPip(activeList);
 
     if (game) {
+      // Check pause gesture || (parallel arms overhead) across active players
+      for (const p of activeList) {
+        if (p.motion) {
+          const events = p.motion.takeEvents();
+          for (const ev of events) {
+            if (ev.type === 'pauseToggle') {
+              toggleGamePause();
+            }
+          }
+        }
+      }
+
+      // Live update Dominant Hand Calibration progress if modal active
+      if (dominantHandCalibrating && activeList[0]) {
+        updateDominantHandCalibration(activeList[0]);
+      }
+
+      // Live update Player 2 Drop-in Gestures if modal active
+      if (pendingPlayer2Join) {
+        updatePlayer2JoinGestures(pendingPlayer2Join);
+      }
+
+      const effectiveDt = (isGamePaused || dominantHandCalibrating) ? 0 : dt;
       for (const p of activeList) {
         p.avatar.aspect = p.aspect;
-        p.avatar.update(p.lm, p.stage, dt, { active: p.active && now - p.lastSeen < 900 });
+        p.avatar.update(p.lm, p.stage, effectiveDt, { active: p.active && now - p.lastSeen < 900 });
       }
-      game.update(dt);
+      if (effectiveDt > 0) {
+        game.update(effectiveDt);
+      }
       applyViewRig(dt);
-      game.fx?.update(dt);
+      game.fx?.update(effectiveDt);
       if (now - lastHudAt > 110) {
         lastHudAt = now;
         const hud = game.getHud();
@@ -1077,6 +1339,52 @@ function boot() {
   }
   net.connect();
   requestAnimationFrame(frame);
+
+  $('#pip-calibrate-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    recalibrateReach();
+  });
+  $('#pip-size-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const pip = $('#tv-tracking-pip');
+    if (pip) {
+      if (pip.classList.contains('pip-large')) {
+        pip.classList.remove('pip-large');
+      } else {
+        pip.classList.add('pip-large');
+      }
+    }
+  });
+  // Pause Modal Actions
+  $('#btn-pause-resume')?.addEventListener('click', () => toggleGamePause(false));
+  $('#btn-pause-hand')?.addEventListener('click', () => {
+    toggleGamePause(false);
+    const mainP = players.get(playerOrder[0]);
+    if (mainP && game) promptDominantHand(mainP, game.id);
+  });
+  $('#btn-pause-home')?.addEventListener('click', () => {
+    toggleGamePause(false);
+    stopGame(true);
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT') return;
+    if (e.key === 'r' || e.key === 'R') {
+      recalibrateReach();
+    }
+    if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+      if (game) toggleGamePause();
+    }
+    if (pendingPlayer2Join) {
+      if (e.key === '1') $('#opt-join-against')?.click();
+      if (e.key === '2') $('#opt-join-with')?.click();
+      if (e.key === 'Escape') $('#btn-join-dismiss')?.click();
+    }
+    if (dominantHandCalibrating) {
+      if (e.key === 'ArrowLeft' || e.key === 'l' || e.key === 'L') $('#hand-opt-left')?.click();
+      if (e.key === 'ArrowRight' || e.key === 'r' || e.key === 'R') $('#hand-opt-right')?.click();
+    }
+  });
 
   $('#btn-fullscreen')?.addEventListener('click', () => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});

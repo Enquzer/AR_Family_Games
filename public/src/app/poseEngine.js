@@ -95,7 +95,8 @@ export class PoseEngine {
       return [];
     }
     this.lastDetections = result?.landmarks || [];
-    return this.tracker.update(this.lastDetections, stamp, aspect);
+    const worldDetections = result?.worldLandmarks || [];
+    return this.tracker.update(this.lastDetections, stamp, aspect, worldDetections);
   }
 
   setMaxPlayers(n) {

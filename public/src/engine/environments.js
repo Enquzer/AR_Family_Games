@@ -1,4 +1,7 @@
 /** Procedural game worlds. Everything is generated at runtime. */
+export { buildBowlingAlley } from './bowlingEnv.js';
+export { buildArcheryRange } from './archeryEnv.js';
+export { canvasTexture, addSky, addLights, disposeObject };
 import * as THREE from '/vendor/three/three.module.js';
 import { canvasTexture, addSky, addLights, makeCrowd, makeStands, bar, labelTexture, disposeObject, setShadow } from './envkit.js';
 import { mulberry32 } from '../shared/math.js';
@@ -263,12 +266,15 @@ export function buildTrack({ finish = 60, hurdles = null, laneCount = 4 } = {}) 
   addSky(scene, 0x08142c, 0x2f6b9e);
   addLights(scene, { key: 0xfff1d6, ambient: 0x335577, keyIntensity: 2.7 });
 
+  const trackLen = Math.max(160, finish + 50);
+  const trackCenterX = (finish + 10) / 2;
+
   const grass = new THREE.Mesh(
-    new THREE.PlaneGeometry(190, 70),
+    new THREE.PlaneGeometry(trackLen + 80, 80),
     new THREE.MeshStandardMaterial({ color: 0x14532d, roughness: 0.95 })
   );
   grass.rotation.x = -Math.PI / 2;
-  grass.position.set(35, -0.03, -18);
+  grass.position.set(trackCenterX, -0.03, -18);
   grass.receiveShadow = true;
   scene.add(grass);
 
@@ -305,11 +311,11 @@ export function buildTrack({ finish = 60, hurdles = null, laneCount = 4 } = {}) 
     for (let i = 0; i < 8; i++) ctx.fillRect(w - 10 + i * 1.2, 0, 0.6, h);
   });
   const track = new THREE.Mesh(
-    new THREE.PlaneGeometry(150, 12),
+    new THREE.PlaneGeometry(trackLen, 12),
     new THREE.MeshStandardMaterial({ map: trackTex, roughness: 0.9 })
   );
   track.rotation.x = -Math.PI / 2;
-  track.position.set(30, 0.005, 0);
+  track.position.set(trackCenterX, 0.005, 0);
   track.receiveShadow = true;
   scene.add(track);
 
@@ -374,8 +380,8 @@ export function buildTrack({ finish = 60, hurdles = null, laneCount = 4 } = {}) 
 
   // Keep the near side of the track clear: the chase camera lives around
   // z = +12, so a second crowd there would fill the lens with giant spheres.
-  scene.add(makeStands({ length: 130, z: -14, side: 1, rows: 5 }));
-  scene.add(makeCrowd({ count: 360, x: [-20, 100], z: [-24, -13], y: [1.0, 5.2], exclude: 0 }));
+  scene.add(makeStands({ length: trackLen + 40, z: -14, side: 1, rows: 5 }));
+  scene.add(makeCrowd({ count: 360, x: [-20, finish + 40], z: [-24, -13], y: [1.0, 5.2], exclude: 0 }));
 
   return {
     scene,
@@ -514,18 +520,18 @@ export function buildCoasterWorld() {
   const terrainGeo = new THREE.PlaneGeometry(420, 420, 90, 90);
   const pos = terrainGeo.attributes.position;
   const colors = [];
-  const cLow = new THREE.Color(0x1f5130);
-  const cMid = new THREE.Color(0x3f6b3a);
-  const cHigh = new THREE.Color(0x8a7a5a);
+  const cLow = new THREE.Color(0x1a4528);
+  const cMid = new THREE.Color(0x2d5a32);
+  const cHigh = new THREE.Color(0x6e624c);
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const y = pos.getY(i);
+    // Valley terrain safely below coaster track (max height -0.5m)
     const h =
-      Math.sin(x * 0.022) * Math.cos(y * 0.018) * 6 +
-      Math.sin(x * 0.055 + 1.3) * Math.cos(y * 0.047) * 2.2 +
-      Math.sin((x + y) * 0.01) * 4;
+      Math.sin(x * 0.015) * Math.cos(y * 0.012) * 1.6 +
+      Math.sin(x * 0.035 + 1.3) * Math.cos(y * 0.028) * 0.8 - 2.8;
     pos.setZ(i, h);
-    const c = cLow.clone().lerp(cMid, Math.min(1, (h + 6) / 12)).lerp(cHigh, Math.max(0, (h - 4) / 8));
+    const c = cLow.clone().lerp(cMid, Math.min(1, (h + 4.5) / 3)).lerp(cHigh, Math.max(0, (h + 1.5) / 2.5));
     colors.push(c.r, c.g, c.b);
   }
   terrainGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
@@ -535,17 +541,45 @@ export function buildCoasterWorld() {
     new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 })
   );
   terrain.rotation.x = -Math.PI / 2;
-  terrain.position.y = -0.2;
+  terrain.position.y = 0;
   terrain.receiveShadow = true;
   scene.add(terrain);
 
+  // Thrilling Theme-Park Roller Coaster Track:
+  // Starts with slow chain-lift climb, grand summit drop, high-G banked hairpin turns,
+  // camelback airtime bunny hill, 360 helix spiral, obstacle gauntlet, and chicane S-curves.
+  // All points stay safely elevated between 7.2m and 34.0m (never clips the ground).
   const points = [
-    [0, 3, 0], [26, 3.4, -12], [46, 6.5, -34], [40, 10.5, -58],
-    [12, 12.5, -72], [-18, 9.5, -62], [-44, 6.5, -38], [-42, 3.8, -10],
-    [-22, 2.8, 10], [0, 2.6, 18], [20, 3.0, 12],
+    // 1. Station & Slow Chain-Lift Climb (u = 0.00 to 0.22)
+    [0, 8.0, 16],          // Station departure
+    [12, 10.5, 6],         // Turn out of station
+    [22, 15.0, -10],       // Chain lift climb
+    [32, 23.0, -28],       // Steep ascent
+    [40, 34.0, -50],       // Summit crest (Peak!)
+
+    // 2. The Mega First Drop & Right Banked Hairpin (u = 0.23 to 0.42)
+    [36, 18.0, -78],       // Plunging down 60-degree first drop!
+    [24, 7.5, -95],        // Bottom of the drop (Maximum speed & G-force!)
+    [2, 9.0, -105],        // Sweeping right turn
+    [-22, 14.0, -96],      // High banked hairpin turn (swivel right!)
+
+    // 3. Camelback Airtime Hill & Left Banked Drop (u = 0.43 to 0.62)
+    [-38, 22.5, -74],      // Crest of Camelback Hill (Floating airtime!)
+    [-46, 8.0, -48],       // Steep dive to the left
+    [-52, 9.5, -20],       // Sweeping high-speed left curve (swivel left!)
+    [-42, 13.0, 10],       // Banking left turn
+
+    // 4. Helix Spiral & Obstacle Trench (u = 0.63 to 0.82)
+    [-24, 18.0, 32],       // Rising curve
+    [-2, 12.0, 42],        // Helix descent (obstacles: DUCK & JUMP!)
+    [18, 7.2, 38],         // Lake trestle bridge
+
+    // 5. Chicane S-Curves & Station Approach (u = 0.83 to 1.00)
+    [28, 9.0, 24],         // Quick right flip
+    [16, 8.0, 20],         // Brake run entry
   ].map((p) => new THREE.Vector3(...p));
   const curve = new THREE.CatmullRomCurve3(points, true, 'catmullrom', 0.5);
-  const samples = curve.getSpacedPoints(320);
+  const samples = curve.getSpacedPoints(380);
   const right = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
   const railA = [];
@@ -560,8 +594,8 @@ export function buildCoasterWorld() {
   const railCurveA = new THREE.CatmullRomCurve3(railA, true, 'catmullrom', 0.5);
   const railCurveB = new THREE.CatmullRomCurve3(railB, true, 'catmullrom', 0.5);
   const railMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.8, roughness: 0.35, emissive: 0x3a1d00, emissiveIntensity: 0.4 });
-  const railGeoA = new THREE.TubeGeometry(railCurveA, 380, 0.11, 6, true);
-  const railGeoB = new THREE.TubeGeometry(railCurveB, 380, 0.11, 6, true);
+  const railGeoA = new THREE.TubeGeometry(railCurveA, 420, 0.11, 8, true);
+  const railGeoB = new THREE.TubeGeometry(railCurveB, 420, 0.11, 8, true);
   scene.add(new THREE.Mesh(railGeoA, railMat), new THREE.Mesh(railGeoB, railMat));
 
   const tieMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.7, roughness: 0.4 });
@@ -582,11 +616,11 @@ export function buildCoasterWorld() {
   scene.add(ties);
 
   const supportMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.6, roughness: 0.5 });
-  for (let i = 0; i < samples.length; i += 14) {
+  for (let i = 0; i < samples.length; i += 12) {
     const p = samples[i];
-    if (p.y < 1.2) continue;
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, p.y, 6), supportMat);
-    leg.position.set(p.x, p.y / 2, p.z);
+    const pillarH = p.y + 1.0;
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.22, pillarH, 8), supportMat);
+    leg.position.set(p.x, (p.y - 1.0) / 2, p.z);
     scene.add(leg);
   }
 
@@ -608,16 +642,16 @@ export function buildCoasterWorld() {
   scene.add(trees);
 
   const station = new THREE.Group();
-  const platform = new THREE.Mesh(new THREE.BoxGeometry(8, 0.4, 6), new THREE.MeshStandardMaterial({ color: 0x5b3a29, roughness: 0.9 }));
-  platform.position.set(0, 1.5, 4);
+  const platform = new THREE.Mesh(new THREE.BoxGeometry(10, 0.5, 8), new THREE.MeshStandardMaterial({ color: 0x5b3a29, roughness: 0.9 }));
+  platform.position.set(0, 7.3, 16);
   station.add(platform);
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(9, 0.25, 7), new THREE.MeshStandardMaterial({ color: 0x7c2d12, roughness: 0.7 }));
-  roof.position.set(0, 5.2, 4);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(12, 0.3, 10), new THREE.MeshStandardMaterial({ color: 0x7c2d12, roughness: 0.7 }));
+  roof.position.set(0, 11.5, 16);
   station.add(roof);
-  for (const x of [-4, 4]) {
-    for (const z of [1, 7]) {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3.7, 6), supportMat);
-      post.position.set(x, 3.35, z);
+  for (const x of [-5, 5]) {
+    for (const z of [12, 20]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 4.2, 6), supportMat);
+      post.position.set(x, 9.4, z);
       station.add(post);
     }
   }

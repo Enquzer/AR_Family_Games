@@ -219,6 +219,22 @@ export class AudioKit {
       case 'bounce':
         this.tone({ freq: 420, to: 180, dur: 0.12, type: 'triangle', gain: 0.18 });
         break;
+      case 'tennisHit': {
+        const p = _clamp(Number(opts?.power) || 0.8, 0.3, 1.4);
+        this.tone({ freq: 820 * p, to: 340, dur: 0.11, type: 'triangle', gain: 0.32 * p });
+        this.noise({ dur: 0.06, gain: 0.28 * p, freq: 1600, q: 2.2, type: 'bandpass' });
+        this.tone({ freq: 240, to: 110, dur: 0.16, type: 'sine', gain: 0.22 * p });
+        break;
+      }
+      case 'tennisBounce': {
+        this.tone({ freq: 280, to: 130, dur: 0.09, type: 'triangle', gain: 0.22 });
+        this.noise({ dur: 0.05, gain: 0.16, freq: 450, q: 1.2, type: 'lowpass' });
+        break;
+      }
+      case 'toss': {
+        this.noise({ dur: 0.25, gain: 0.14, freq: 800, q: 0.8, sweep: 1800 });
+        break;
+      }
       case 'hit':
         this.tone({ freq: 620, to: 240, dur: 0.14, type: 'triangle', gain: 0.28 });
         this.noise({ dur: 0.05, gain: 0.15, freq: 2400, q: 1.2 });
@@ -255,6 +271,73 @@ export class AudioKit {
         this.noise({ dur: 0.25, gain: 0.22, freq: 700, q: 0.8, sweep: 150 });
         this.tone({ freq: 180, to: 90, dur: 0.3, type: 'triangle', gain: 0.16 });
         break;
+      case 'pinHit': {
+        const p = _clamp(Number(opts?.power) || 0.6, 0.2, 1.4);
+        this.noise({ dur: 0.08, gain: 0.22 * p, freq: 2800, q: 2.2, type: 'bandpass' });
+        this.tone({ freq: 880 * p, to: 280, dur: 0.12, type: 'triangle', gain: 0.2 * p });
+        this.tone({ freq: 440 * p, to: 160, dur: 0.16, type: 'sine', gain: 0.15 * p });
+        break;
+      }
+      case 'strike': {
+        this.noise({ dur: 0.35, gain: 0.38, freq: 2200, q: 0.8, type: 'bandpass', sweep: 800 });
+        this.noise({ dur: 0.45, gain: 0.25, freq: 800, q: 0.5, type: 'lowpass', delay: 0.03 });
+        this.tone({ freq: 720, to: 180, dur: 0.25, type: 'triangle', gain: 0.3 });
+        this.tone({ freq: 110, to: 45, dur: 0.4, type: 'sine', gain: 0.45, delay: 0.05 });
+        this.play('cheer');
+        break;
+      }
+      case 'gutter': {
+        this.noise({ dur: 0.22, gain: 0.28, freq: 320, q: 0.8, type: 'lowpass', sweep: 80 });
+        this.tone({ freq: 120, to: 40, dur: 0.28, type: 'sine', gain: 0.35 });
+        break;
+      }
+      case 'ballRoll': {
+        this.noise({ dur: 0.15, gain: 0.06, freq: 160, q: 1.5, type: 'lowpass' });
+        break;
+      }
+      case 'bowDraw': {
+        const tension = _clamp(Number(opts?.tension) || 0.5, 0.1, 1.0);
+        this.tone({ freq: 80 + tension * 120, to: 120 + tension * 160, dur: 0.12, type: 'sawtooth', gain: 0.04 * tension });
+        this.noise({ dur: 0.08, gain: 0.03 * tension, freq: 800 + tension * 600, q: 1.8, type: 'bandpass' });
+        break;
+      }
+      case 'bowRelease': {
+        this.tone({ freq: 440, to: 180, dur: 0.14, type: 'triangle', gain: 0.28 });
+        this.noise({ dur: 0.18, gain: 0.22, freq: 1400, q: 0.9, sweep: 3400 });
+        break;
+      }
+      case 'arrowHit': {
+        const p = _clamp(Number(opts?.power) || 0.8, 0.3, 1.2);
+        this.noise({ dur: 0.07, gain: 0.25 * p, freq: 1800, q: 1.6, type: 'bandpass' });
+        this.tone({ freq: 280, to: 75, dur: 0.15, type: 'sine', gain: 0.35 * p });
+        break;
+      }
+      case 'bullseye': {
+        this.tone({ freq: 1046.5, dur: 0.18, type: 'triangle', gain: 0.22 });
+        this.tone({ freq: 1318.5, dur: 0.22, type: 'triangle', gain: 0.25, delay: 0.06 });
+        this.tone({ freq: 1567.98, dur: 0.35, type: 'sine', gain: 0.28, delay: 0.12 });
+        this.tone({ freq: 2093.0, dur: 0.45, type: 'sine', gain: 0.22, delay: 0.18 });
+        this.play('cheer');
+        break;
+      }
+      case 'pounding': {
+        const p = _clamp(Number(opts?.power) || 1.0, 0.4, 1.6);
+        this.noise({ dur: 0.12, gain: 0.42 * p, freq: 380, q: 0.9, type: 'lowpass', sweep: 80 });
+        this.tone({ freq: 110 * p, to: 32, dur: 0.28, type: 'sine', gain: 0.55 * p });
+        this.tone({ freq: 220, to: 65, dur: 0.15, type: 'triangle', gain: 0.35 * p });
+        this.noise({ dur: 0.05, gain: 0.22, freq: 3200, q: 2.0, type: 'bandpass' });
+        break;
+      }
+      case 'telegraph': {
+        this.tone({ freq: 880, to: 440, dur: 0.12, type: 'sawtooth', gain: 0.12 });
+        break;
+      }
+      case 'dizzy': {
+        for (let i = 0; i < 3; i++) {
+          this.tone({ freq: 1200 + i * 200, to: 1000 + i * 150, dur: 0.1, type: 'sine', gain: 0.08, delay: i * 0.08 });
+        }
+        break;
+      }
       default:
         break;
     }

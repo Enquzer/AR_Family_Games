@@ -3,11 +3,13 @@
  * punches, tennis swings, blocking, leaning, running cadence, jumps,
  * crouching, arm raises and rowing strokes.
  *
- * Everything is scale-invariant (normalised by shoulder width / body height)
- * so it works whether the player is close to or far from the camera.
+ * Everything is scale-invariant (normalised by shoulder width / body height
+ * and MediaPipe metric worldLandmarks) so it works reliably whether the player
+ * is close to or far from the camera.
  */
 import { clamp, damp, dist2 } from '../shared/math.js';
 import { LM, mid } from '../shared/pose.js';
+import { CONFIG } from '../shared/config.js';
 
 const nowMs = () => performance.now();
 
@@ -15,6 +17,7 @@ export class MotionTracker {
   constructor() {
     this.state = this.#blank();
     this.prev = null;
+    this.prevWorld = null;
     this.lastTime = 0;
     this.stepTimes = [];
     this.punchCooldown = { L: 0, R: 0 };
@@ -36,11 +39,20 @@ export class MotionTracker {
     this.handPrev = { L: null, R: null };
     this.prevHandSpeed = { L: 0, R: 0 };
     this.punchCandidate = {
-      L: { frames: 0, best: null },
-      R: { frames: 0, best: null },
+      L: { frames: 0, integral: 0, best: null },
+      R: { frames: 0, integral: 0, best: null },
     };
     this.lastPunchAt = 0;
     this.lastPushAt = 0;
+    this.pauseHoldDuration = 0;
+    this.lastPauseToggleAt = 0;
+    this.domHoldL = 0;
+    this.domHoldR = 0;
+
+    // Feature ring buffer (0.5s at 60Hz)
+    this.ringBuffer = [];
+    this.ringMaxSize = CONFIG.motion?.ringBufferSize || 30;
+    this.handSpeedHistory = [];
   }
 
   #blank() {
@@ -56,6 +68,12 @@ export class MotionTracker {
       cadence: 0,
       steps: 0,
       armsUp: 0,
+      pauseProgress: 0,
+      pauseHold: 0,
+      reachForwardL: 0,
+      reachForwardR: 0,
+      dominantCandidate: null,
+      dominantProgress: { L: 0, R: 0 },
       duck: 0,
       rowPower: 0,
       strokes: 0,
@@ -107,6 +125,7 @@ export class MotionTracker {
   reset() {
     this.state = this.#blank();
     this.prev = null;
+    this.prevWorld = null;
     this.lastTime = 0;
     this.stepTimes = [];
     this.ankleBase = { L: null, R: null };
@@ -122,22 +141,30 @@ export class MotionTracker {
     this.handPrev = { L: null, R: null };
     this.prevHandSpeed = { L: 0, R: 0 };
     this.punchCandidate = {
-      L: { frames: 0, best: null },
-      R: { frames: 0, best: null },
+      L: { frames: 0, integral: 0, best: null },
+      R: { frames: 0, integral: 0, best: null },
     };
     this.lastPunchAt = 0;
     this.lastPushAt = 0;
+    this.pauseHoldDuration = 0;
+    this.lastPauseToggleAt = 0;
+    this.domHoldL = 0;
+    this.domHoldR = 0;
+    this.ringBuffer = [];
+    this.handSpeedHistory = [];
   }
 
   /**
    * @param {Array} lm landmarks
    * @param {number} aspect video aspect
    * @param {number} ts milliseconds
+   * @param {Array|null} worldLm metric worldLandmarks (meters)
+   * @param {Array|null} smoothLm optional smooth landmarks
    */
-  update(lm, aspect = 16 / 9, ts = nowMs()) {
+  update(lm, aspect = 16 / 9, ts = nowMs(), worldLm = null, smoothLm = null) {
     const s = this.state;
     const now = ts;
-    const dt = this.lastTime ? clamp((now - this.lastTime) / 1000, 0.01, 0.2) : 0.05;
+    const dt = this.lastTime ? clamp((now - this.lastTime) / 1000, 0.005, 0.2) : 0.033;
     this.lastTime = now;
 
     if (!lm || lm.length < 33) {
@@ -206,6 +233,7 @@ export class MotionTracker {
     const lateralR = prev?.wrR ? Math.abs(wrR.x - prev.wrR.x) / Math.max(dt, 0.01) / shoulderW : 0;
     const verticalL = prev?.wrL ? Math.abs(wrL.y - prev.wrL.y) / Math.max(dt, 0.01) / shoulderW : 0;
     const verticalR = prev?.wrR ? Math.abs(wrR.y - prev.wrR.y) / Math.max(dt, 0.01) / shoulderW : 0;
+
     // Side-to-side motion with a raised hand is a wave, not a punch/swing.
     const waveCandidate =
       (handHighL && lateralL > 1.35 && lateralL > verticalL * 1.2) ||
@@ -215,16 +243,58 @@ export class MotionTracker {
     const extension = Math.max(extL, extR);
     const handSpeed = Math.max(handSpeedL, handSpeedR);
 
-    // Forward velocity is only meaningful when the wrist moves toward the
-    // camera. MediaPipe's z channel is noisy, so clamp it before scoring.
-    const forwardSpeedL = prev?.wrL ? clamp((prev.wrL.z - wrL.z) / Math.max(dt, 0.01) / shoulderW, 0, 8) : 0;
-    const forwardSpeedR = prev?.wrR ? clamp((prev.wrR.z - wrR.z) / Math.max(dt, 0.01) / shoulderW, 0, 8) : 0;
+    // Track hand speed history for adaptive per-player percentile calibration
+    this.handSpeedHistory.push({ t: now, speed: handSpeed });
+    if (this.handSpeedHistory.length > 180) this.handSpeedHistory.shift();
+
+    // Metric worldLandmarks processing (if available from MediaPipe)
+    let forwardSpeedL = 0;
+    let forwardSpeedR = 0;
+    let metricSpeedL = 0;
+    let metricSpeedR = 0;
+
+    if (worldLm && worldLm.length >= 33) {
+      const wWrL = worldLm[LM.L_WRIST];
+      const wWrR = worldLm[LM.R_WRIST];
+      if (this.prevWorld) {
+        // MediaPipe world z: negative is forward toward camera.
+        // Therefore, forward speed (m/s) = (prevZ - currZ) / dt
+        metricSpeedL = Math.max(0, (this.prevWorld.wrL.z - wWrL.z) / Math.max(dt, 0.01));
+        metricSpeedR = Math.max(0, (this.prevWorld.wrR.z - wWrR.z) / Math.max(dt, 0.01));
+        forwardSpeedL = clamp(metricSpeedL * 1.8, 0, 10);
+        forwardSpeedR = clamp(metricSpeedR * 1.8, 0, 10);
+      }
+      this.prevWorld = {
+        wrL: { x: wWrL.x, y: wWrL.y, z: wWrL.z },
+        wrR: { x: wWrR.x, y: wWrR.y, z: wWrR.z },
+      };
+    } else {
+      // Fallback to normalized camera coordinates divided by shoulder width
+      forwardSpeedL = prev?.wrL ? clamp((prev.wrL.z - wrL.z) / Math.max(dt, 0.01) / shoulderW, 0, 8) : 0;
+      forwardSpeedR = prev?.wrR ? clamp((prev.wrR.z - wrR.z) / Math.max(dt, 0.01) / shoulderW, 0, 8) : 0;
+    }
+
     const prevExtL = this.handPrev.L?.ext ?? extL;
     const prevExtR = this.handPrev.R?.ext ?? extR;
     const extVelL = (extL - prevExtL) / Math.max(dt, 0.01);
     const extVelR = (extR - prevExtR) / Math.max(dt, 0.01);
     const accelL = clamp((handSpeedL - this.prevHandSpeed.L) / Math.max(dt, 0.01), -40, 40);
     const accelR = clamp((handSpeedR - this.prevHandSpeed.R) / Math.max(dt, 0.01), -40, 40);
+
+    // Push snapshot into feature ring buffer
+    this.ringBuffer.push({
+      t: now,
+      dt,
+      wrL,
+      wrR,
+      extL,
+      extR,
+      fwdL: forwardSpeedL,
+      fwdR: forwardSpeedR,
+      speedL: handSpeedL,
+      speedR: handSpeedR,
+    });
+    if (this.ringBuffer.length > this.ringMaxSize) this.ringBuffer.shift();
 
     s.handSpeed = damp(s.handSpeed, handSpeed, 18, dt);
     s.extension = extension;
@@ -250,18 +320,15 @@ export class MotionTracker {
     s.elbowL = angleAt(wrL, elL, shL);
     s.elbowR = angleAt(wrR, elR, shR);
     s.shoulderTilt = clamp((shR.y - shL.y) / (shoulderW * 0.8), -1, 1);
-    // Torso twist is the angle between the 3D shoulder line and the 3D hip
-    // line. Comparing only their 2D widths made a normal shoulder/hip width
-    // difference look like a permanent twist, which added phantom power and
-    // made cue-ball shots curve even when the player was square to the TV.
+
+    // 3D Torso twist from shoulder and hip vectors
     const shAngle = Math.atan2(shR.z - shL.z, shR.x - shL.x);
     const hipAngle = Math.atan2(hipR.z - hipL.z, hipR.x - hipL.x);
     s.torsoTwist = clamp((shAngle - hipAngle) * 1.2, -1, 1);
     s.confidence = vis;
     s.lastSeen = now;
 
-    // Overall motion energy: used by dance/groove scoring and to keep idle
-    // sensor noise from ever looking like an intentional movement.
+    // Overall motion energy: used by dance/groove scoring
     const bodySpeed = (speedOf(hip, prev?.hip) + speedOf(sh, prev?.sh) + speedOf(anL, prev?.anL) + speedOf(anR, prev?.anR)) / 4;
     s.energy = damp(s.energy, clamp((handSpeed * 0.35 + bodySpeed * 0.75) / 2.0, 0, 1), 8, dt);
 
@@ -283,22 +350,28 @@ export class MotionTracker {
     const punchScoreL =
       Math.max(0, handSpeedL - 0.55) * 0.9 +
       Math.max(0, extVelL) * 1.15 +
-      forwardSpeedL * 0.55 +
-      Math.max(0, extL - 0.9) * 1.4 +
+      forwardSpeedL * 0.65 +
+      Math.max(0, extL - 0.85) * 1.4 +
       torsoDrive;
     const punchScoreR =
       Math.max(0, handSpeedR - 0.55) * 0.9 +
       Math.max(0, extVelR) * 1.15 +
-      forwardSpeedR * 0.55 +
-      Math.max(0, extR - 0.9) * 1.4 +
+      forwardSpeedR * 0.65 +
+      Math.max(0, extR - 0.85) * 1.4 +
       torsoDrive;
 
-    const tryPunch = (hand, score, ext, extVel, fwdSpeed, lateralSpeed, wristY, speed, accel) => {
+    const minForwardMps = CONFIG.motion?.punch?.minForwardSpeedMps || 1.15;
+    const minArmExt = CONFIG.motion?.punch?.minArmExtension || 0.75;
+    const punchCooldownMs = CONFIG.motion?.punch?.cooldownMs || 220;
+
+    const tryPunch = (hand, score, ext, extVel, fwdSpeed, lateralSpeed, wristY, speed, accel, metricSpd) => {
       const candidate = this.punchCandidate[hand];
       const handRaised = wristY < hip.y + bodyH * 0.04 && wristY > sh.y - bodyH * 0.62;
-      const reachOK = ext > 0.82 || (lateralSpeed > 1.7 && ext > 0.68);
-      const extending = extVel > 0.18 || fwdSpeed > 0.45 || lateralSpeed > 1.9;
-      const strongEnough = speed > 1.15 && score > 1.9;
+      const reachOK = ext > minArmExt || (lateralSpeed > 1.7 && ext > minArmExt * 0.85);
+      const extending = extVel > 0.15 || fwdSpeed > 0.40 || lateralSpeed > 1.8;
+      const metricPass = metricSpd > 0 ? metricSpd > minForwardMps * 0.6 : true;
+      const strongEnough = speed > 1.1 && score > 1.8 && metricPass;
+
       const qualified =
         now >= this.waveLockUntil &&
         !waveCandidate &&
@@ -310,33 +383,44 @@ export class MotionTracker {
 
       if (!qualified) {
         candidate.frames = Math.max(0, candidate.frames - 1);
+        candidate.integral = Math.max(0, candidate.integral - score * 0.5);
         candidate.best = null;
         return;
       }
 
       candidate.frames++;
+      candidate.integral += score;
       candidate.best = { score, ext, fwdSpeed, speed, accel };
-      // Require the same burst on two consecutive frames. A single noisy
-      // MediaPipe z spike can no longer register as a phantom punch.
+
+      // Integrate burst over at least 2 consecutive frames
       if (candidate.frames < 2) return;
-      if (now - this.punchCooldown[hand] < 260) return;
-      if (now - this.lastPunchAt < 90) return;
+      if (now - this.punchCooldown[hand] < punchCooldownMs) return;
+      if (now - this.lastPunchAt < 80) return;
 
       this.punchCooldown[hand] = now;
       this.lastPunchAt = now;
       candidate.frames = 0;
-      const quality = clamp((score - 1.7) / 3.1, 0, 1);
-      const power = clamp(0.32 + quality * 1.0, 0.3, 1.35);
+      candidate.integral = 0;
+
+      const quality = clamp((score - 1.6) / 3.0, 0, 1);
+      const power = clamp(0.35 + quality * 1.0, 0.35, 1.4);
       const momentum = clamp(
-        quality * (0.55 + Math.abs(s.torsoTwist) * 0.3 + Math.min(fwdSpeed, 2.5) * 0.1) +
+        quality * (0.55 + Math.abs(s.torsoTwist) * 0.35 + Math.min(fwdSpeed, 2.5) * 0.12) +
           Math.min(Math.abs(accel) * 0.012, 0.18),
         0,
-        1.35
+        1.4
       );
+
+      const zone = wristY <= sh.y + 0.04 ? 'head' : 'torso';
+      const elbowAngle = hand === 'L' ? s.elbowL : s.elbowR;
+      const hardHit = ext > 1.05 || (elbowAngle && elbowAngle > 145) || speed > 2.0;
+
       const ev = {
         type: 'punch',
         hand,
-        power,
+        zone,
+        hardHit,
+        power: hardHit ? Math.min(1.5, power * 1.25) : power,
         quality,
         momentum,
         reach: ext,
@@ -355,8 +439,9 @@ export class MotionTracker {
       if (hand === 'L') s.punchL = now;
       else s.punchR = now;
     };
-    tryPunch('L', punchScoreL, extL, extVelL, forwardSpeedL, lateralL, wrL.y, handSpeedL, accelL);
-    tryPunch('R', punchScoreR, extR, extVelR, forwardSpeedR, lateralR, wrR.y, handSpeedR, accelR);
+
+    tryPunch('L', punchScoreL, extL, extVelL, forwardSpeedL, lateralL, wrL.y, handSpeedL, accelL, metricSpeedL);
+    tryPunch('R', punchScoreR, extR, extVelR, forwardSpeedR, lateralR, wrR.y, handSpeedR, accelR, metricSpeedR);
     this.handPrev.L = { ext: extL, z: wrL.z };
     this.handPrev.R = { ext: extR, z: wrR.z };
     this.prevHandSpeed.L = handSpeedL;
@@ -367,8 +452,8 @@ export class MotionTracker {
       !waveCandidate &&
       s.block < 0.5 &&
       now - this.swingCooldown > 300 &&
-      handSpeed > 2.1 &&
-      extension > 1.02 &&
+      handSpeed > 2.0 &&
+      extension > 1.0 &&
       handsUp
     ) {
       this.swingCooldown = now;
@@ -387,25 +472,22 @@ export class MotionTracker {
     s.swing = damp(s.swing, 0, 8, dt);
 
     /* ---------------- two-hand push (Balling) ---------------- */
-    // A forward push of either/both hands. This is intentionally separate from
-    // the punch detector: a low push toward the table should launch a ball even
-    // though it is not a raised boxing punch. Aim comes from where the hands are
-    // relative to the shoulders; curve comes from wrist depth and torso twist.
     const pushForward = Math.max(forwardSpeedL, forwardSpeedR);
     const pushSpeed = Math.max(handSpeedL, handSpeedR);
     const pushHandsX = (wrL.x + wrR.x) * 0.5;
-    const handsNear = Math.abs(wrL.x - wrR.x) < shoulderW * 2.0;
+    const handsNear = Math.abs(wrL.x - wrR.x) < shoulderW * (CONFIG.motion?.push?.handsNearShoulderRatio || 1.85);
+
     if (
       now >= this.waveLockUntil &&
       !waveCandidate &&
       s.block < 0.6 &&
-      now - this.lastPushAt > 520 &&
+      now - this.lastPushAt > (CONFIG.motion?.push?.cooldownMs || 450) &&
       handsNear &&
-      pushForward > 1.0 &&
-      pushSpeed > 0.45
+      pushForward > (CONFIG.motion?.push?.minForwardSpeed || 0.85) &&
+      pushSpeed > 0.42
     ) {
       this.lastPushAt = now;
-      const quality = clamp((pushForward * 0.55 + pushSpeed * 0.18 - 0.55) / 2.6, 0, 1);
+      const quality = clamp((pushForward * 0.55 + pushSpeed * 0.18 - 0.5) / 2.5, 0, 1);
       const power = clamp(0.35 + quality * 1.0, 0.3, 1.35);
       const aim = clamp((pushHandsX - sh.x) / shoulderW * 0.55 + s.torsoTwist * 0.25 + s.lean * 0.15, -0.7, 0.7);
       const curve = clamp((wrR.z - wrL.z) / shoulderW * 0.85 + s.torsoTwist * 0.5, -1, 1);
@@ -428,10 +510,6 @@ export class MotionTracker {
     }
 
     /* ---------------- steps / running ---------------- */
-    // Running in place is detected from *both* the legs and the arms. A lot of
-    // webcams lose the ankles when the player is close to the TV, so relying on
-    // ankle lift alone made the running games look frozen. Knee lift, ankle
-    // lift, alternating arm swing and hip bob now all feed the same cadence.
     const liftL = (this.ankleBase.L - anL.y) / bodyH;
     const liftR = (this.ankleBase.R - anR.y) / bodyH;
     const kneeLiftL = (this.kneeBase.L - knL.y) / bodyH;
@@ -452,8 +530,6 @@ export class MotionTracker {
       this.stepTimes.push(now);
       s.steps++;
     }
-    // Hysteresis: arm the next step at the full threshold, but only re-arm
-    // after the foot has come back down below 60% of it.
     const liftLUp = prev?.liftLUp ? legLiftL > stepThreshold * 0.58 : legLiftL > stepThreshold;
     const liftRUp = prev?.liftRUp ? legLiftR > stepThreshold * 0.58 : legLiftR > stepThreshold;
 
@@ -495,15 +571,17 @@ export class MotionTracker {
     s.jump = damp(s.jump, jumpNow, 14, dt);
 
     /* ---------------- kick detection ---------------- */
-    const KICK_VEL_THRESH = 1.8;
+    const KICK_VEL_THRESH = CONFIG.motion?.kick?.velThreshold || 1.7;
     const anLVelY = this.prevAnkleY.L != null ? (this.prevAnkleY.L - anL.y) / Math.max(dt, 0.01) / bodyH : 0;
     const anRVelY = this.prevAnkleY.R != null ? (this.prevAnkleY.R - anR.y) / Math.max(dt, 0.01) / bodyH : 0;
-    if (anLVelY > KICK_VEL_THRESH && anRVelY < KICK_VEL_THRESH * 0.5 && !this.airborne && now - this.kickCooldown.L > 500) {
+    const kickCooldownMs = CONFIG.motion?.kick?.cooldownMs || 480;
+
+    if (anLVelY > KICK_VEL_THRESH && anRVelY < KICK_VEL_THRESH * 0.5 && !this.airborne && now - this.kickCooldown.L > kickCooldownMs) {
       this.kickCooldown.L = now;
       s.events.push({ type: 'kick', side: 'L', power: clamp((anLVelY - KICK_VEL_THRESH) / 3, 0.2, 1.0), at: now });
       s.kickL = now;
     }
-    if (anRVelY > KICK_VEL_THRESH && anLVelY < KICK_VEL_THRESH * 0.5 && !this.airborne && now - this.kickCooldown.R > 500) {
+    if (anRVelY > KICK_VEL_THRESH && anLVelY < KICK_VEL_THRESH * 0.5 && !this.airborne && now - this.kickCooldown.R > kickCooldownMs) {
       this.kickCooldown.R = now;
       s.events.push({ type: 'kick', side: 'R', power: clamp((anRVelY - KICK_VEL_THRESH) / 3, 0.2, 1.0), at: now });
       s.kickR = now;
@@ -515,19 +593,70 @@ export class MotionTracker {
     const armsUpNow = wrL.y < headY + 0.01 && wrR.y < headY + 0.01 ? 1 : 0;
     s.armsUp = damp(s.armsUp, armsUpNow, 10, dt);
 
+    /* ---------------- pause gesture || (parallel arms overhead) ---------------- */
+    const wristsAboveHead = wrL.y < headY - 0.03 && wrR.y < headY - 0.03;
+    const elbowsAboveShoulders = elL.y < shL.y + 0.08 && elR.y < shR.y + 0.08;
+    const wristDistX = Math.abs(wrR.x - wrL.x);
+    const parallelRatio = shoulderW > 0.02 ? wristDistX / shoulderW : 1.0;
+    // Parallel vertical pillars: wrists not crossed (wrL.x < wrR.x) and between 0.65x and 1.65x shoulder width
+    const isPausePillars = wristsAboveHead && elbowsAboveShoulders && parallelRatio >= 0.65 && parallelRatio <= 1.65 && wrL.x < wrR.x;
+
+    if (isPausePillars) {
+      this.pauseHoldDuration = (this.pauseHoldDuration || 0) + dt;
+      s.pauseProgress = clamp(this.pauseHoldDuration / 0.75, 0, 1);
+      if (this.pauseHoldDuration >= 0.75 && now - (this.lastPauseToggleAt || 0) > 1800) {
+        this.lastPauseToggleAt = now;
+        this.pauseHoldDuration = 0;
+        s.events.push({ type: 'pauseToggle', at: now });
+      }
+    } else {
+      this.pauseHoldDuration = Math.max(0, (this.pauseHoldDuration || 0) - dt * 2.5);
+      s.pauseProgress = clamp((this.pauseHoldDuration || 0) / 0.75, 0, 1);
+    }
+    s.pauseHold = s.pauseProgress;
+
+    /* ---------------- dominant hand reach / extension ---------------- */
+    let reachFWD_L = 0;
+    let reachFWD_R = 0;
+    if (worldLm && worldLm[LM.L_WRIST] && worldLm[LM.L_SHOULDER]) {
+      reachFWD_L = -(worldLm[LM.L_WRIST].z - worldLm[LM.L_SHOULDER].z);
+      reachFWD_R = -(worldLm[LM.R_WRIST].z - worldLm[LM.R_SHOULDER].z);
+    } else {
+      reachFWD_L = Math.hypot(wrL.x - shL.x, wrL.y - shL.y) / (shoulderW * 1.8);
+      reachFWD_R = Math.hypot(wrR.x - shR.x, wrR.y - shR.y) / (shoulderW * 1.8);
+    }
+    s.reachForwardL = reachFWD_L;
+    s.reachForwardR = reachFWD_R;
+
+    if (reachFWD_R > 0.28 && reachFWD_R > reachFWD_L + 0.14) {
+      this.domHoldR = (this.domHoldR || 0) + dt;
+      this.domHoldL = 0;
+    } else if (reachFWD_L > 0.28 && reachFWD_L > reachFWD_R + 0.14) {
+      this.domHoldL = (this.domHoldL || 0) + dt;
+      this.domHoldR = 0;
+    } else {
+      this.domHoldR = Math.max(0, (this.domHoldR || 0) - dt * 2.2);
+      this.domHoldL = Math.max(0, (this.domHoldL || 0) - dt * 2.2);
+    }
+
+    s.dominantCandidate = this.domHoldR >= 0.65 ? 'R' : this.domHoldL >= 0.65 ? 'L' : null;
+    s.dominantProgress = {
+      R: clamp((this.domHoldR || 0) / 0.65, 0, 1),
+      L: clamp((this.domHoldL || 0) / 0.65, 0, 1),
+    };
+
     /* ---------------- crouch / duck ---------------- */
-    // standingHipY is anchored at wave-join or first frame; only drifts when
-    // the player is clearly upright, so a prolonged squat won't recalibrate.
     if (this.standingHipY == null) this.standingHipY = hip.y;
-    const duckNow = clamp((hip.y - this.standingHipY) / (bodyH * 0.18), 0, 1);
+    const duckRatio = CONFIG.motion?.duck?.hipDropThreshold || 0.08;
+    const duckNow = clamp((hip.y - this.standingHipY) / (bodyH * duckRatio * 2.2), 0, 1);
     if (duckNow < 0.1) this.standingHipY += (hip.y - this.standingHipY) * 0.008;
     s.duck = damp(s.duck, duckNow, 12, dt);
 
     /* ---------------- wave to join ---------------- */
-    // A wave is a raised hand that sweeps side-to-side at least twice. It is
-    // deliberately different from a punch (forward) or a tennis swing (one arc).
     const raisedL = handHighL;
     const raisedR = handHighR;
+    const waveCfg = CONFIG.motion?.wave || { minChanges: 2, minSweepShoulderRatio: 0.13, lockoutDurationMs: 650, repeatCooldownMs: 1600 };
+
     if ((raisedL || raisedR) && Number.isFinite(shoulderW) && shoulderW > 0.02) {
       const wrist = raisedL && (!raisedR || wrL.y <= wrR.y) ? wrL : wrR;
       const nx = (wrist.x - sh.x) / shoulderW;
@@ -540,23 +669,22 @@ export class MotionTracker {
       let lastX = this.waveHistory[0]?.x ?? nx;
       for (const sample of this.waveHistory) {
         const dx = sample.x - lastX;
-        if (Math.abs(dx) > 0.13) {
+        if (Math.abs(dx) > waveCfg.minSweepShoulderRatio) {
           const sign = Math.sign(dx);
           if (lastSign && sign !== lastSign) changes++;
           lastSign = sign;
           lastX = sample.x;
         }
       }
-      s.waveProgress = clamp(changes / 2, 0, 1);
-      if (changes >= 2 && now - this.lastWaveAt > 1800) {
+      s.waveProgress = clamp(changes / waveCfg.minChanges, 0, 1);
+      if (changes >= waveCfg.minChanges && now - this.lastWaveAt > waveCfg.repeatCooldownMs) {
         this.lastWaveAt = now;
-        this.waveLockUntil = now + 650;
-        // A wave must never register as a punch, swing or rowing stroke.
+        this.waveLockUntil = now + waveCfg.lockoutDurationMs;
+        // A wave must never register as a punch, swing, push or rowing stroke.
         s.events = s.events.filter((e) => e.type !== 'punch' && e.type !== 'swing' && e.type !== 'stroke' && e.type !== 'push');
         s.waveAt = now;
         s.waveProgress = 1;
         s.events.push({ type: 'wave', hand: raisedL ? 'L' : 'R', at: now });
-        // Anchor the squat baseline at this confirmed-standing moment
         this.standingHipY = hip.y;
       }
     } else {
@@ -595,8 +723,6 @@ export class MotionTracker {
       time: now,
     };
 
-    // A page that only forwards poses (the laptop controller) never drains
-    // gameplay events. Keep the buffer bounded so long sessions stay healthy.
     if (s.events.length > 64) s.events.splice(0, s.events.length - 64);
     return s;
   }
@@ -611,7 +737,6 @@ export class MotionTracker {
     return this.state;
   }
 
-  // Convenience accessors so games can read `player.motion.run` etc. directly.
   get run() { return this.state.run; }
   get jump() { return this.state.jump; }
   get lean() { return this.state.lean; }

@@ -11,6 +11,7 @@ import * as THREE from '/vendor/three/three.module.js';
 import { BaseGame } from './base.js';
 import { buildBallingHall } from '../engine/environments.js';
 import { clamp, damp } from '../shared/math.js';
+import { PoolSim } from '../sim/pool.js';
 
 const BALL_R = 0.14;
 const SHOTS_PER_PLAYER = 3;
@@ -62,6 +63,38 @@ export class BallingGame extends BaseGame {
     this.env = buildBallingHall();
     const scene = this.env.scene;
     this.table = this.env.table;
+
+    // Decoupled continuous-collision pool physics engine
+    this.sim = new PoolSim({
+      tableWidth: this.table.width,
+      tableLength: this.table.length,
+      ballRadius: BALL_R,
+      pockets: this.table.pockets,
+      onBallHit: (a, b, impact) => {
+        const cueHit = a.cue || b.cue;
+        if (cueHit) {
+          const colored = a.cue ? b.userBall : a.userBall;
+          this.#onCueHit(colored, impact);
+        } else if (impact > 1.2) {
+          this.ctx.audio.play('ballHit', { power: Math.min(1, impact / 12) });
+        }
+        if (impact > 4) {
+          this.fx.burst({ x: b.x, y: this.table.y + BALL_R, z: b.z }, '#e2e8f0', 5, {
+            speed: 1.6,
+            life: 0.25,
+            gravity: -4,
+          });
+        }
+      },
+      onCushionHit: (b, impact) => {
+        if (impact > 1.2) {
+          this.ctx.audio.play('ballHit', { power: Math.min(1, impact / 12) });
+        }
+      },
+      onPocket: (b) => {
+        this.#pocket(b.userBall);
+      },
+    });
 
     // Triangle rack (10 balls: 1 + 2 + 3 + 4).
     let idx = 0;
@@ -155,7 +188,21 @@ export class BallingGame extends BaseGame {
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = this.table.y + 0.006;
     this.env.scene.add(shadow);
-    return {
+
+    const simBall = {
+      id: cue ? 'cue' : `ball_${color}`,
+      cue,
+      x: 0,
+      z: 0,
+      vx: 0,
+      vz: 0,
+      spin: 0,
+      spinTime: 0,
+      pocketed: false,
+    };
+    this.sim.addBall(simBall);
+
+    const userBall = {
       cue,
       color,
       mesh,
@@ -166,10 +213,21 @@ export class BallingGame extends BaseGame {
       spinTime: 0,
       pocketed: false,
       hitThisShot: false,
+      sim: simBall,
     };
+    simBall.userBall = userBall;
+    return userBall;
   }
 
   #resetRack() {
+    this.cueBall.sim.x = CUE_START.x;
+    this.cueBall.sim.z = CUE_START.z;
+    this.cueBall.sim.vx = 0;
+    this.cueBall.sim.vz = 0;
+    this.cueBall.sim.spin = 0;
+    this.cueBall.sim.spinTime = 0;
+    this.cueBall.sim.pocketed = false;
+
     this.cueBall.pos.set(CUE_START.x, this.table.y + BALL_R, CUE_START.z);
     this.cueBall.vel.set(0, 0, 0);
     this.cueBall.spin = 0;
@@ -181,6 +239,14 @@ export class BallingGame extends BaseGame {
 
     this.rackBalls.forEach((b, i) => {
       const r = this.rackLayout[i];
+      b.sim.x = r.x;
+      b.sim.z = r.z;
+      b.sim.vx = 0;
+      b.sim.vz = 0;
+      b.sim.spin = 0;
+      b.sim.spinTime = 0;
+      b.sim.pocketed = false;
+
       b.pos.set(r.x, this.table.y + BALL_R, r.z);
       b.vel.set(0, 0, 0);
       b.spin = 0;
@@ -303,7 +369,7 @@ export class BallingGame extends BaseGame {
     });
     if (active) {
       const slot = slots[0];
-      this.place(active, slot.x, slot.z, { y: 0, facing: 0 });
+      this.place(active, slot.x, slot.z, { y: 0, facing: Math.PI });
       active.avatar.setVisible(true);
       active.avatar.seated = false;
       active.avatar.followStage = false;
@@ -412,16 +478,20 @@ export class BallingGame extends BaseGame {
     const p = this.#activePlayer();
     if (!p) return;
     const power = clampNum(ev.power, 0.25, 1.0, this.power);
-    // Use the same smoothed aim/curve shown by the on-table guide. The raw
-    // push snapshot can be a few frames ahead of the visible aim line, which
-    // made demo shots veer into a side pocket even though the guide looked safe.
+    // Use the same smoothed aim/curve shown by the on-table guide.
     const aim = clampNum(this.aim, -0.8, 0.8, 0);
     const curve = clampNum(this.curve, -1, 1, 0);
     const speed = 7 + power * 11;
-    this.cueBall.vel.set(Math.sin(aim) * speed, 0, -Math.cos(aim) * speed);
+
+    this.cueBall.sim.vx = Math.sin(aim) * speed;
+    this.cueBall.sim.vz = -Math.cos(aim) * speed;
+    this.cueBall.sim.spin = curve;
+    this.cueBall.sim.spinTime = 1.15;
+    this.cueBall.vel.set(this.cueBall.sim.vx, 0, this.cueBall.sim.vz);
     this.cueBall.spin = curve;
     this.cueBall.spinTime = 1.15;
     this.cueBall.hitThisShot = false;
+
     this.phase = 'rolling';
     this.rollingTime = 0;
     this.settleTimer = 0;
@@ -442,110 +512,29 @@ export class BallingGame extends BaseGame {
   }
 
   #stepPhysics(dt) {
-    const steps = Math.min(6, Math.max(1, Math.ceil(dt / 0.008)));
-    const h = dt / steps;
-    for (let step = 0; step < steps; step++) {
-      this.#substep(h);
-    }
-    this.#syncBall(this.cueBall);
-    for (const b of this.rackBalls) this.#syncBall(b);
-  }
+    this.sim.step(dt);
 
-  #substep(h) {
+    const _rotAxis = new THREE.Vector3();
+    const _rotQuat = new THREE.Quaternion();
     const all = [this.cueBall, ...this.rackBalls];
-    const minX = -this.table.width / 2 + BALL_R;
-    const maxX = this.table.width / 2 - BALL_R;
-    const minZ = -this.table.length / 2 + BALL_R;
-    const maxZ = this.table.length / 2 - BALL_R;
 
     for (const b of all) {
-      if (b.pocketed) continue;
-      if (b.cue && b.spinTime > 0) {
-        b.vel.x += b.spin * 5.4 * h;
-        b.spinTime = Math.max(0, b.spinTime - h);
-      }
-      const drag = Math.exp(-0.58 * h);
-      b.vel.x *= drag;
-      b.vel.z *= drag;
+      b.pos.x = b.sim.x;
+      b.pos.z = b.sim.z;
+      b.vel.x = b.sim.vx;
+      b.vel.z = b.sim.vz;
+      b.pocketed = b.sim.pocketed;
+
       const sp = Math.hypot(b.vel.x, b.vel.z);
-      if (sp < 0.018) {
-        b.vel.x = 0;
-        b.vel.z = 0;
-      } else if (sp > 22) {
-        b.vel.x *= 22 / sp;
-        b.vel.z *= 22 / sp;
+      if (sp > 0.02 && !b.pocketed) {
+        const rotDist = sp * dt;
+        const rotAngle = rotDist / BALL_R;
+        _rotAxis.set(b.vel.z, 0, -b.vel.x).normalize();
+        _rotQuat.setFromAxisAngle(_rotAxis, rotAngle);
+        b.mesh.quaternion.premultiply(_rotQuat);
       }
-      b.pos.x += b.vel.x * h;
-      b.pos.z += b.vel.z * h;
-
-      if (this.#tryPocket(b)) continue;
-
-      if (b.pos.x < minX) {
-        b.pos.x = minX;
-        b.vel.x = Math.abs(b.vel.x) * 0.93;
-        if (Math.abs(b.vel.x) > 1.2) this.ctx.audio.play('ballHit', { power: Math.min(1, Math.abs(b.vel.x) / 12) });
-      } else if (b.pos.x > maxX) {
-        b.pos.x = maxX;
-        b.vel.x = -Math.abs(b.vel.x) * 0.93;
-        if (Math.abs(b.vel.x) > 1.2) this.ctx.audio.play('ballHit', { power: Math.min(1, Math.abs(b.vel.x) / 12) });
-      }
-      if (b.pos.z < minZ) {
-        b.pos.z = minZ;
-        b.vel.z = Math.abs(b.vel.z) * 0.93;
-      } else if (b.pos.z > maxZ) {
-        b.pos.z = maxZ;
-        b.vel.z = -Math.abs(b.vel.z) * 0.93;
-      }
+      this.#syncBall(b);
     }
-
-    for (let i = 0; i < all.length; i++) {
-      const a = all[i];
-      if (a.pocketed) continue;
-      for (let j = i + 1; j < all.length; j++) {
-        const b = all[j];
-        if (b.pocketed) continue;
-        const dx = b.pos.x - a.pos.x;
-        const dz = b.pos.z - a.pos.z;
-        const d2 = dx * dx + dz * dz;
-        const minD = BALL_R * 2;
-        if (d2 >= minD * minD || d2 < 1e-9) continue;
-        const d = Math.sqrt(d2);
-        const nx = dx / d;
-        const nz = dz / d;
-        const overlap = minD - d;
-        a.pos.x -= nx * overlap * 0.5;
-        a.pos.z -= nz * overlap * 0.5;
-        b.pos.x += nx * overlap * 0.5;
-        b.pos.z += nz * overlap * 0.5;
-
-        const rel = (b.vel.x - a.vel.x) * nx + (b.vel.z - a.vel.z) * nz;
-        if (rel < 0) {
-          const e = 0.95;
-          const impulse = -(1 + e) * rel * 0.5;
-          a.vel.x -= nx * impulse;
-          a.vel.z -= nz * impulse;
-          b.vel.x += nx * impulse;
-          b.vel.z += nz * impulse;
-          const impact = Math.abs(rel);
-          const cueHit = a.cue || b.cue;
-          if (cueHit) {
-            const colored = a.cue ? b : a;
-            this.#onCueHit(colored, impact);
-          } else if (impact > 1.2) {
-            this.ctx.audio.play('ballHit', { power: Math.min(1, impact / 12) });
-          }
-          if (impact > 4) {
-            this.fx.burst({ x: b.pos.x, y: this.table.y + BALL_R, z: b.pos.z }, '#e2e8f0', 5, {
-              speed: 1.6,
-              life: 0.25,
-              gravity: -4,
-            });
-          }
-        }
-      }
-    }
-
-    for (const b of all) if (!b.pocketed) this.#tryPocket(b);
   }
 
   #onCueHit(ball, impact) {
@@ -569,23 +558,13 @@ export class BallingGame extends BaseGame {
     this.ctx.engine.shake(0.04 + power * 0.05, 0.12);
   }
 
-  #tryPocket(b) {
-    if (b.pocketed) return false;
-    for (const p of this.table.pockets) {
-      const dx = b.pos.x - p.x;
-      const dz = b.pos.z - p.z;
-      if (dx * dx + dz * dz < 0.33 * 0.33) {
-        this.#pocket(b);
-        return true;
-      }
-    }
-    return false;
-  }
-
   #pocket(b) {
     if (b.pocketed) return;
     b.pocketed = true;
+    b.sim.pocketed = true;
     b.vel.set(0, 0, 0);
+    b.sim.vx = 0;
+    b.sim.vz = 0;
     b.mesh.visible = false;
     b.shadow.visible = false;
     const p = this.#activePlayer();
@@ -614,6 +593,13 @@ export class BallingGame extends BaseGame {
   #checkSettled(dt) {
     if (this.cueBall.pocketed && this.time >= this.cueRespawnAt) {
       this.cueBall.pocketed = false;
+      this.cueBall.sim.pocketed = false;
+      this.cueBall.sim.x = CUE_START.x;
+      this.cueBall.sim.z = CUE_START.z;
+      this.cueBall.sim.vx = 0;
+      this.cueBall.sim.vz = 0;
+      this.cueBall.sim.spin = 0;
+      this.cueBall.sim.spinTime = 0;
       this.cueBall.pos.set(CUE_START.x, this.table.y + BALL_R, CUE_START.z);
       this.cueBall.vel.set(0, 0, 0);
       this.cueBall.spin = 0;
@@ -712,8 +698,9 @@ export class BallingGame extends BaseGame {
       dot.material.opacity = 0.62 - t * 0.35;
       dot.material.color.setHSL(0.52 - Math.abs(this.curve) * 0.12, 0.9, 0.65);
     }
-    const ghostDist = 4.9;
-    const ghostBend = this.curve * 0.85;
+    const aimInfo = this.sim.findAimTarget(baseX, baseZ, dirX, dirZ, 6.0);
+    const ghostDist = aimInfo.hit ? aimInfo.dist : 4.9;
+    const ghostBend = this.curve * (ghostDist / 4.9) * 0.85;
     this.aimGhost.position.set(
       baseX + dirX * ghostDist + perpX * ghostBend,
       this.table.y + 0.04,
@@ -721,6 +708,11 @@ export class BallingGame extends BaseGame {
     );
     this.aimGhost.visible = true;
     this.aimGhost.material.opacity = 0.5 + this.power * 0.35;
+    if (aimInfo.hit) {
+      this.aimGhost.material.color.setHex(0x34d399); // green target lock on object ball
+    } else {
+      this.aimGhost.material.color.setHex(0x67e8f9); // cyan search trajectory
+    }
     this.activeRing.visible = true;
   }
 

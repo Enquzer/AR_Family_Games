@@ -33,6 +33,10 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.wasm': 'application/wasm',
+  '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json',
+  '.fbx': 'application/octet-stream',
+  '.bin': 'application/octet-stream',
   '.task': 'application/octet-stream',
   '.map': 'application/json',
   '.txt': 'text/plain; charset=utf-8',
@@ -396,3 +400,10 @@ function shutdown() {
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+
+process.on('uncaughtException', (err) => {
+  console.error('[server] Uncaught exception:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] Unhandled rejection:', reason);
+});

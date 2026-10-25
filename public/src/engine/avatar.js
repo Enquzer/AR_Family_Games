@@ -9,9 +9,34 @@ import { clamp, damp, lerp } from '../shared/math.js';
 import { LM, mid } from '../shared/pose.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
+const POLE_FORWARD = new THREE.Vector3(0, 0.2, 0.98).normalize();
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _dir = new THREE.Vector3();
+
+function solveTwoBoneIK(root, target, pole, l1, l2, outKnee) {
+  const toTarget = new THREE.Vector3().subVectors(target, root);
+  const totalL = l1 + l2;
+  const d = Math.max(0.01, Math.min(totalL - 0.002, toTarget.length()));
+  const dir = toTarget.normalize();
+
+  const cosAlpha = clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1);
+  const sinAlpha = Math.sqrt(Math.max(0, 1 - cosAlpha * cosAlpha));
+
+  const planeNormal = new THREE.Vector3().crossVectors(dir, pole);
+  if (planeNormal.lengthSq() < 1e-4) {
+    planeNormal.set(1, 0, 0);
+  } else {
+    planeNormal.normalize();
+  }
+  const bendPerp = new THREE.Vector3().crossVectors(planeNormal, dir).normalize();
+
+  outKnee.copy(root)
+    .addScaledVector(dir, l1 * cosAlpha)
+    .addScaledVector(bendPerp, l1 * sinAlpha);
+
+  return outKnee;
+}
 
 let shadowTexture = null;
 function getShadowTexture() {
@@ -130,6 +155,12 @@ export class Avatar {
     for (const k of ['hip', 'neck', 'head', 'shL', 'shR', 'elL', 'elR', 'wrL', 'wrR', 'hipL', 'hipR', 'knL', 'knR', 'anL', 'anR', 'ftL', 'ftR']) {
       this.joints[k] = new THREE.Vector3();
     }
+
+    // Foot planting state machine (hysteresis to prevent foot skating)
+    this.footPlant = {
+      L: { state: 'plant', plantPos: new THREE.Vector3(-0.11, 0.04, 0.09), prevPos: new THREE.Vector3(-0.11, 0.04, 0.09) },
+      R: { state: 'plant', plantPos: new THREE.Vector3(0.11, 0.04, 0.09), prevPos: new THREE.Vector3(0.11, 0.04, 0.09) },
+    };
 
     this.torso = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 14, 1), this.suitMat);
     this.torso.castShadow = true;
@@ -381,14 +412,212 @@ export class Avatar {
     }, duration * 1000);
   }
 
-  setProp(prop) {
+  setProp(prop, dominantHand = 'R') {
     this.prop = prop;
+    this.dominantHand = dominantHand;
     const gloves = prop === 'gloves';
     this.gloveL.visible = this.gloveR.visible = gloves;
     this.handL.visible = this.handR.visible = !gloves;
+
+    // Attach props to the player's calibrated dominant hand
+    const targetPivot = dominantHand === 'L' ? this.pivotL : this.pivotR;
+    if (this.racket.parent !== targetPivot) {
+      targetPivot.add(this.racket);
+      this.racket.rotation.y = dominantHand === 'L' ? Math.PI : 0;
+    }
+    if (this.ballProp.parent !== targetPivot) {
+      targetPivot.add(this.ballProp);
+    }
+
     this.racket.visible = prop === 'racket';
     this.oar.visible = this.oarL.visible = prop === 'oars';
     this.ballProp.visible = prop === 'ball';
+  }
+
+  /**
+   * Athletic uniform with running jersey, race bib number, and athletic shorts.
+   * @param {{ bibNumber?: number|string, jerseyColor?: string, shortsColor?: string }|null} outfit
+   */
+  setAthleticOutfit(outfit = null) {
+    if (!outfit) {
+      if (this._customJerseyTex) {
+        this._customJerseyTex.dispose();
+        this._customJerseyTex = null;
+      }
+      if (this._customJerseyMat) {
+        this._customJerseyMat.dispose();
+        this._customJerseyMat = null;
+      }
+      if (this._customShortsMat) {
+        this._customShortsMat.dispose();
+        this._customShortsMat = null;
+      }
+      this.torso.material = this.suitMat;
+      this.chest.material = this.accentMat;
+      this.limbs.thighL.material = this.suitMat;
+      this.limbs.thighR.material = this.suitMat;
+      return;
+    }
+
+    const bib = outfit.bibNumber ?? '1';
+    const jColor = outfit.jerseyColor || this.colorHex || '#22d3ee';
+    const sColor = outfit.shortsColor || '#0f172a';
+
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 256;
+    const ctx = c.getContext('2d');
+
+    // Jersey base color
+    ctx.fillStyle = jColor;
+    ctx.fillRect(0, 0, 256, 256);
+
+    // Athletic side stripe accents
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.fillRect(24, 0, 28, 256);
+    ctx.fillRect(204, 0, 28, 256);
+
+    // Race bib badge
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(44, 65, 168, 126);
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(44, 65, 168, 126);
+
+    // Bib Olympic banner header
+    ctx.fillStyle = '#ef4444';
+    ctx.fillRect(47, 68, 162, 30);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('AR OLYMPICS', 128, 83);
+
+    // Bib number
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 72px system-ui, sans-serif';
+    ctx.fillText(String(bib), 128, 142);
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this._customJerseyTex = tex;
+
+    this._customJerseyMat = new THREE.MeshStandardMaterial({
+      map: tex,
+      roughness: 0.52,
+      metalness: 0.18,
+    });
+
+    this._customShortsMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(sColor),
+      roughness: 0.65,
+      metalness: 0.15,
+    });
+
+    this.torso.material = this._customJerseyMat;
+    this.chest.material = this._customJerseyMat;
+    this.limbs.thighL.material = this._customShortsMat;
+    this.limbs.thighR.material = this._customShortsMat;
+  }
+
+  /**
+   * VIP Dance Coach Outfit: holographic iridescent stage jacket, soundwave equalizer,
+   * neon sneakers, and stage DJ headphones with mic boom.
+   */
+  setCoachDancerOutfit() {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 256;
+    const ctx = c.getContext('2d');
+
+    // Deep metallic indigo/purple gradient
+    const grad = ctx.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, '#1e1035');
+    grad.addColorStop(0.5, '#2e1065');
+    grad.addColorStop(1, '#0f051d');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 256, 256);
+
+    // Neon soundwave equalizer bars on chest
+    const barWidth = 14;
+    const heights = [35, 75, 115, 90, 130, 80, 105, 55, 120, 65];
+    for (let i = 0; i < heights.length; i++) {
+      const bx = 34 + i * 19;
+      const h = heights[i];
+      ctx.fillStyle = i % 2 ? '#f472b6' : '#22d3ee';
+      ctx.fillRect(bx, 155 - h, barWidth, h);
+    }
+
+    // VIP Coach Gold Badge
+    ctx.fillStyle = '#facc15';
+    ctx.font = 'bold 22px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('★ DANCE COACH ★', 128, 195);
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this._customDancerTex = tex;
+
+    this._customDancerMat = new THREE.MeshStandardMaterial({
+      map: tex,
+      roughness: 0.28,
+      metalness: 0.82,
+      emissive: new THREE.Color(0x3b0764),
+      emissiveIntensity: 0.7,
+    });
+
+    const dancePantsMat = new THREE.MeshStandardMaterial({
+      color: 0x090514,
+      roughness: 0.35,
+      metalness: 0.65,
+    });
+
+    this.torso.material = this._customDancerMat;
+    this.chest.material = this._customDancerMat;
+    this.limbs.thighL.material = dancePantsMat;
+    this.limbs.thighR.material = dancePantsMat;
+    this.limbs.shinL.material = dancePantsMat;
+    this.limbs.shinR.material = dancePantsMat;
+
+    // Glowing neon stage sneakers
+    const sneakerMat = new THREE.MeshStandardMaterial({
+      color: 0x22d3ee,
+      emissive: 0x22d3ee,
+      emissiveIntensity: 2.2,
+      roughness: 0.2,
+    });
+    this.footL.material = sneakerMat;
+    this.footR.material = sneakerMat;
+
+    // DJ Stage Headphones on headGroup
+    if (!this._headphones) {
+      const hpGroup = new THREE.Group();
+      const bandMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.8, roughness: 0.2 });
+      const cupMat = new THREE.MeshStandardMaterial({ color: 0xf472b6, emissive: 0xf472b6, emissiveIntensity: 1.8 });
+
+      // Arc band
+      const band = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.016, 8, 24, Math.PI), bandMat);
+      band.position.set(0, 0.06, 0);
+      hpGroup.add(band);
+
+      // Ear Cups
+      const cupL = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.035, 16), cupMat);
+      cupL.rotation.z = Math.PI / 2;
+      cupL.position.set(-0.13, 0.05, 0);
+      const cupR = cupL.clone();
+      cupR.position.x = 0.13;
+      hpGroup.add(cupL, cupR);
+
+      // Microphone boom
+      const mic = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.12, 6), bandMat);
+      mic.rotation.x = -Math.PI / 3;
+      mic.position.set(-0.11, 0.02, 0.07);
+      hpGroup.add(mic);
+
+      this.headGroup.add(hpGroup);
+      this._headphones = hpGroup;
+    }
   }
 
   /**
@@ -531,18 +760,67 @@ export class Avatar {
       this.target.anR.set(0.14, 0.2, 0.52);
       this.target.ftL.set(-0.14, 0.16, 0.6);
       this.target.ftR.set(0.14, 0.16, 0.6);
-    }
+    } else {
+      // Foot planting state machine (prevents jitter / foot skating)
+      const FLOOR_Y = 0.04;
+      const updateFootPlant = (side, targetFoot, targetAnkle) => {
+        const fp = this.footPlant[side];
+        const speed = targetFoot.distanceTo(fp.prevPos);
+        fp.prevPos.copy(targetFoot);
 
-    // Floor IK: prevent ankles/feet from floating above or sinking below floor plane
-    const FLOOR_Y = 0.04;
-    this.target.anL.y = Math.max(this.target.anL.y, FLOOR_Y);
-    this.target.anR.y = Math.max(this.target.anR.y, FLOOR_Y);
-    this.target.ftL.y = Math.max(this.target.ftL.y, FLOOR_Y - 0.01);
-    this.target.ftR.y = Math.max(this.target.ftR.y, FLOOR_Y - 0.01);
+        if (fp.state === 'plant') {
+          if (targetFoot.y > FLOOR_Y + 0.08 || speed > 0.05) {
+            fp.state = 'swing';
+          } else {
+            targetFoot.x = fp.plantPos.x;
+            targetFoot.z = fp.plantPos.z;
+            targetFoot.y = FLOOR_Y;
+            targetAnkle.x = fp.plantPos.x;
+            targetAnkle.z = fp.plantPos.z - 0.08;
+            targetAnkle.y = FLOOR_Y + 0.04;
+          }
+        } else {
+          if (targetFoot.y <= FLOOR_Y + 0.04 && speed < 0.035) {
+            fp.state = 'plant';
+            fp.plantPos.copy(targetFoot);
+            fp.plantPos.y = FLOOR_Y;
+          }
+        }
+        targetFoot.y = Math.max(targetFoot.y, FLOOR_Y);
+        targetAnkle.y = Math.max(targetAnkle.y, FLOOR_Y + 0.03);
+      };
+
+      updateFootPlant('L', this.target.ftL, this.target.anL);
+      updateFootPlant('R', this.target.ftR, this.target.anR);
+
+      // Pelvis root pull: prevent hyperextension popping when squatting or crouching
+      const distL = this.target.hipL.distanceTo(this.target.anL);
+      const distR = this.target.hipR.distanceTo(this.target.anR);
+      const maxLeg = 0.85;
+      const overL = Math.max(0, distL - maxLeg);
+      const overR = Math.max(0, distR - maxLeg);
+      const maxOver = Math.max(overL, overR);
+      if (maxOver > 0.001) {
+        this.target.hip.y -= maxOver * 0.9;
+        this.target.hipL.y -= maxOver * 0.9;
+        this.target.hipR.y -= maxOver * 0.9;
+      }
+
+      // Analytic Two-Bone IK for legs
+      solveTwoBoneIK(this.target.hipL, this.target.anL, POLE_FORWARD, 0.44, 0.42, this.target.knL);
+      solveTwoBoneIK(this.target.hipR, this.target.anR, POLE_FORWARD, 0.44, 0.42, this.target.knR);
+    }
   }
 
   #applyJoints() {
     const j = this.joints;
+
+    // Dynamically lock hip root to midpoint of left and right hips
+    // so pelvis, torso, and legs are physically anchored as one continuous biomechanical body
+    j.hip.x = (j.hipL.x + j.hipR.x) * 0.5;
+    j.hip.y = (j.hipL.y + j.hipR.y) * 0.5;
+    j.hip.z = (j.hipL.z + j.hipR.z) * 0.5;
+
     // Proper skeleton chain: hip -> torso -> neck -> head, with a clavicle bar
     // joining the two shoulders. This makes the head/neck/shoulder structure
     // read as a body instead of a triangle floating above the arms.

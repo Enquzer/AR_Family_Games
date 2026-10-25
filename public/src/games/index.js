@@ -6,10 +6,12 @@ import { BoatGame } from './boat.js';
 import { CoasterGame } from './coaster.js';
 import { DanceGame } from './dance.js';
 import { BallingGame } from './balling.js';
+import { BowlingGame } from './bowling.js';
+import { ArcheryGame } from './archery.js';
 
 export class SprintGame extends TrackGame {
   constructor(ctx, options = {}) {
-    super(ctx, { ...options, id: 'sprint', title: 'SPRINT', subtitle: 'Run in place · three heats', distance: 60, heats: 3, maxSpeed: 10.2 });
+    super(ctx, { ...options, id: 'sprint', title: '100m SPRINT', subtitle: 'Olympic Track & Field · 3 Heats', distance: 60, heats: 3, maxSpeed: 10.4 });
   }
 }
 
@@ -18,12 +20,12 @@ export class HurdlesGame extends TrackGame {
     super(ctx, {
       ...options,
       id: 'hurdles',
-      title: 'HURDLES',
-      subtitle: 'Run and jump · 80 metres',
-      distance: 80,
+      title: '110m HURDLES',
+      subtitle: 'Olympic Track & Field · 3 Heats',
+      distance: 110,
       heats: 3,
-      maxSpeed: 9.4,
-      hurdles: [12, 24, 36, 48, 60, 72],
+      maxSpeed: 9.8,
+      hurdles: [16, 26, 36, 46, 56, 66, 76, 86, 96],
     });
   }
 }
@@ -37,6 +39,8 @@ export const GAME_CLASSES = {
   coaster: CoasterGame,
   dance: DanceGame,
   balling: BallingGame,
+  bowling: BowlingGame,
+  archery: ArcheryGame,
 };
 
 export function createGame(id, ctx, options = {}) {

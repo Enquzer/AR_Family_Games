@@ -1381,20 +1381,27 @@ code {
 }
 
 .attract-games {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: clamp(8px, 1.1vw, 14px);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: stretch;
+  gap: 10px;
   width: 100%;
+  max-width: 1020px;
+  margin: 0 auto;
 }
 
 .attract-card {
+  flex: 0 1 calc(20% - 10px);
+  min-width: 135px;
+  max-width: 190px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: clamp(10px, 1.5vw, 18px) 10px;
-  border-radius: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
+  gap: 6px;
+  padding: clamp(8px, 1.1vw, 14px) 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
   background-color: #070b16;
   background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.01));
   position: relative;
@@ -2529,8 +2536,8 @@ code {
     padding-bottom: 0;
   }
 
-  .attract-games {
-    grid-template-columns: repeat(3, 1fr);
+  .attract-card {
+    flex: 0 1 calc(33.333% - 10px);
   }
 
   .hud-players .pcard {
@@ -2551,8 +2558,8 @@ code {
     flex: 1;
   }
 
-  .attract-games {
-    grid-template-columns: repeat(2, 1fr);
+  .attract-card {
+    flex: 0 1 calc(50% - 10px);
   }
 
   .hud-topbar {
@@ -2579,4 +2586,308 @@ code {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Kinect Modals: Dominant Hand, Pause, Player 2 Drop-In              */
+/* ------------------------------------------------------------------ */
+
+.kinect-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 24, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  padding: 24px;
+  animation: modalFadeIn 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.kinect-modal-overlay[hidden] {
+  display: none !important;
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.kinect-modal-card {
+  background: linear-gradient(145deg, rgba(20, 28, 48, 0.96), rgba(12, 18, 34, 0.98));
+  border: 2px solid rgba(56, 189, 248, 0.35);
+  border-radius: 28px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.65), 0 0 40px rgba(56, 189, 248, 0.2);
+  padding: 36px 44px;
+  max-width: 640px;
+  width: 100%;
+  text-align: center;
+  color: #f8fafc;
+  position: relative;
+  overflow: hidden;
+}
+
+.modal-badge {
+  display: inline-block;
+  padding: 4px 14px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  margin-bottom: 12px;
+}
+
+.modal-badge.accent {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.kinect-modal-card h2 {
+  font-size: 2.1rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  margin: 0 0 8px 0;
+  color: #ffffff;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+
+.modal-sub {
+  font-size: 1.05rem;
+  color: #94a3b8;
+  margin: 0 0 28px 0;
+}
+
+/* Hand Selection Cards */
+.hand-selection-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.hand-opt-card {
+  background: rgba(30, 41, 59, 0.65);
+  border: 2px solid rgba(148, 163, 184, 0.25);
+  border-radius: 20px;
+  padding: 24px 16px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.hand-opt-card:hover, .hand-opt-card.active {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.14);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 28px rgba(56, 189, 248, 0.25);
+}
+
+.hand-opt-card.locked {
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.22);
+  box-shadow: 0 0 35px rgba(34, 197, 94, 0.45);
+}
+
+.hand-reach-ring {
+  width: 96px;
+  height: 96px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.hand-reach-ring svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.hand-reach-ring .ring-track {
+  fill: none;
+  stroke: rgba(148, 163, 184, 0.2);
+  stroke-width: 6;
+}
+
+.hand-reach-ring .ring-progress {
+  fill: none;
+  stroke: #38bdf8;
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-dasharray: 264;
+  stroke-dashoffset: 264;
+  transition: stroke-dashoffset 0.08s linear;
+}
+
+.hand-opt-card.locked .ring-progress {
+  stroke: #22c55e;
+}
+
+.hand-icon {
+  font-size: 2.8rem;
+  z-index: 2;
+}
+
+.hand-opt-card h3 {
+  margin: 0 0 4px 0;
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.hand-hint {
+  font-size: 0.85rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.modal-footer-hint {
+  font-size: 0.85rem;
+  color: #64748b;
+  margin-top: 12px;
+}
+
+/* Pause Modal */
+.pause-card {
+  max-width: 520px;
+}
+
+.pause-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.pause-symbol {
+  font-size: 2.4rem;
+  color: #fbbf24;
+  text-shadow: 0 0 20px rgba(245, 158, 11, 0.6);
+}
+
+.code-pill {
+  background: rgba(56, 189, 248, 0.25);
+  color: #38bdf8;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 1.1em;
+}
+
+.pause-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.pause-btn {
+  padding: 14px 20px;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: 14px;
+}
+
+/* Join Options Modal */
+.join-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-bottom: 24px;
+}
+
+.join-opt-card {
+  background: rgba(30, 41, 59, 0.7);
+  border: 2px solid rgba(148, 163, 184, 0.25);
+  border-radius: 20px;
+  padding: 24px 16px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.join-opt-card:hover {
+  transform: translateY(-4px);
+}
+
+.join-opt-card.versus:hover, .join-opt-card.versus.active {
+  border-color: #f43f5e;
+  background: rgba(244, 63, 94, 0.16);
+  box-shadow: 0 10px 24px rgba(244, 63, 94, 0.3);
+}
+
+.join-opt-card.coop:hover, .join-opt-card.coop.active {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.16);
+  box-shadow: 0 10px 24px rgba(16, 185, 129, 0.3);
+}
+
+.join-icon {
+  font-size: 2.8rem;
+  margin-bottom: 8px;
+}
+
+.join-opt-card h3 {
+  margin: 0 0 4px 0;
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.join-opt-card p {
+  margin: 0 0 10px 0;
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+
+.join-gesture-hint {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #38bdf8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: rgba(56, 189, 248, 0.15);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.dismiss-btn {
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #94a3b8;
+  padding: 10px 20px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.dismiss-btn:hover {
+  color: #f8fafc;
+  border-color: #f8fafc;
+  background: rgba(255, 255, 255, 0.08);
 }

@@ -2,24 +2,25 @@
  * Boxing: First-Person & Facing Immersive 1v1 Arena.
  * 
  * Features:
- * - Face-to-face combat orientation with opponent bot right in front of you.
- * - First-Person POV by default (immersion like Creed / Punch-Out / Wii Sports)
- *   with procedural 3D Boxing Gloves in the foreground tracking jabs, hooks, and blocks.
- * - Toggleable Over-the-Shoulder view (press 'V' or 'P').
- * - True Motion Kinematics for both sides:
- *   * Bot hit recoil: head snapback, torso twist, lateral stagger, visor flash, 3D sparks & rings.
- *   * Player hit recoil: camera flinch & tilt, red screen flash, engine screen shake, block shield.
- *   * Knockout physics: bot crumples backwards onto the ring canvas.
- * - Seamless punch matching: accurate forward-thrust and jab registration.
+ * - Face-to-face combat orientation with 3D opponent bot in front of you.
+ * - Distinct hit kinetics: Head shots snap head back & twist; Torso body shots hunch & buckle.
+ * - High Guard Face Block: covering face with both gloves forms peek-a-boo shield, blocking all damage.
+ * - Elbow Extension & Power Hits: extended haymakers trigger "HARD HIT!" with extra bounce & pounding sound.
+ * - Comic Dizzy Stars: 3D cartoon spinning stars orbit boxer's head when life <= 25% (75% damaged).
+ * - Elastic Bounce: hits bounce boxers realistically across ring canvas.
+ * - Bot AI Telegraph: bot winds up with visual/audio warning tell, ending autonomous self-play.
+ * - Ringside Camera Flashes & Celebratory Crowd: flashes burst and crowd cheers on player victory.
+ * - Persistent Player Profile: adds points, updates stats, and increments wins in saved profile.
  */
 import * as THREE from '/vendor/three/three.module.js';
 import { BaseGame } from './base.js';
 import { buildArena } from '../engine/environments.js';
 import { Avatar } from '../engine/avatar.js';
+import { createRiggedAvatar } from '../engine/riggedModel.js';
 import { clamp, damp, lerp } from '../shared/math.js';
 
 const MAX_HP = 100;
-const ROUND_TIME = 42;
+const ROUND_TIME = 45;
 const ROUNDS_TO_WIN = 2;
 
 export class BoxingGame extends BaseGame {
@@ -36,8 +37,14 @@ export class BoxingGame extends BaseGame {
     this.combo = 0;
     this.lastComboAt = 0;
     this.bot = null;
-    this.botNextPunch = 2.2;
+
+    // Bot AI state machine
+    this.botState = 'idle'; // 'idle' | 'windup' | 'recovery'
+    this.botWindupTimer = 0;
+    this.botRecoveryTimer = 0;
+    this.botNextPunch = 2.8;
     this.botBlockUntil = 0;
+
     this.introTick = 0;
     this.results = [];
 
@@ -49,6 +56,9 @@ export class BoxingGame extends BaseGame {
     this.fpGroup = null;
     this.fpGloveL = null;
     this.fpGloveR = null;
+
+    // Arena Effects
+    this.cameraFlashes = [];
 
     this.onKey = (e) => {
       if (e.target.tagName === 'INPUT') return;
@@ -63,6 +73,7 @@ export class BoxingGame extends BaseGame {
     this.env = buildArena();
     this.scene = this.env.scene;
     this.#buildFirstPersonGloves();
+    this.cameraFlashes = this.#createCameraFlashes();
   }
 
   #buildFirstPersonGloves() {
@@ -110,6 +121,44 @@ export class BoxingGame extends BaseGame {
     this.scene.add(this.fpGroup);
   }
 
+  #createCameraFlashes() {
+    const flashes = [];
+    for (let i = 0; i < 22; i++) {
+      const light = new THREE.PointLight(0xffffff, 0, 22);
+      const angle = (i / 22) * Math.PI * 2 + (Math.random() - 0.5) * 0.2;
+      const radius = 7.5 + Math.random() * 4.5;
+      const y = 2.8 + Math.random() * 4.5;
+      light.position.set(Math.cos(angle) * radius, y, Math.sin(angle) * radius);
+      this.scene.add(light);
+      flashes.push({ light, flashTimer: 0 });
+    }
+    return flashes;
+  }
+
+  #createDizzyStars() {
+    const group = new THREE.Group();
+    const starGeo = new THREE.OctahedronGeometry(0.08, 0);
+    const starMat = new THREE.MeshStandardMaterial({
+      color: 0xfbbf24,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 0.9,
+      roughness: 0.2,
+      metalness: 0.1,
+    });
+
+    const stars = [];
+    for (let i = 0; i < 4; i++) {
+      const star = new THREE.Mesh(starGeo, starMat);
+      star.scale.set(1.2, 0.6, 1.2);
+      group.add(star);
+      stars.push(star);
+    }
+    group.rotation.x = 0.28;
+    group.visible = false;
+    this.scene.add(group);
+    return { group, stars };
+  }
+
   toggleView() {
     this.viewMode = this.viewMode === 'fp' ? 'chase' : 'fp';
     if (this.fpGroup) {
@@ -128,12 +177,20 @@ export class BoxingGame extends BaseGame {
     this.beginMatch();
   }
 
-  addPlayer(p) {
+  addPlayer(p, mode = 'against') {
     if (p.joined === false) return;
     super.addPlayer(p);
     if (this.phase === 'idle' || this.phase === 'waiting') {
       if (!this.queue.find((x) => x.key === p.key)) this.queue.push(p);
       if (this.queue.length >= 1) this.beginMatch();
+    } else if (mode === 'against' && this.fighters[1]?.isBot) {
+      // Player 2 takes over opponent corner from bot
+      if (this.bot) this.bot.setVisible(false);
+      if (this.bot?._rigged) this.bot._rigged.setVisible(false);
+      this.fighters[1] = this.#makeFighter(p, 1);
+      this.fighters[1].isBot = false;
+      this.message = '1V1 MATCH!';
+      this.messageSub = `${p.name} joined as Opponent!`;
     } else if (!this.fighters.find((f) => f.p === p)) {
       if (!this.queue.find((x) => x.key === p.key)) this.queue.push(p);
       p.avatar.setVisible(false);
@@ -161,10 +218,10 @@ export class BoxingGame extends BaseGame {
 
     this.fighters = [
       this.#makeFighter(p1, 0), // Player 1 (Near side, facing opponent)
-      p2 ? this.#makeFighter(p2, 1) : this.#makeBotFighter(this.bot, 1), // Opponent (Far side, facing player)
+      p2 ? this.#makeFighter(p2, 1) : this.#makeBotFighter(this.bot, 1), // Opponent
     ];
 
-    // Colorize first person gloves with player 1's color
+    // Colorize first-person gloves with player 1's color
     if (this.fpGloveL && this.fpGloveR && p1.color) {
       this.fpGloveL.mat.color.set(p1.color);
       this.fpGloveL.mat.emissive.set(p1.color);
@@ -172,7 +229,6 @@ export class BoxingGame extends BaseGame {
       this.fpGloveR.mat.emissive.set(p1.color);
     }
 
-    // In first-person mode, player 1's avatar is hidden from own view
     this.fighters[0].avatar.setVisible(this.viewMode === 'chase');
     this.fighters[1].avatar.setVisible(true);
 
@@ -192,6 +248,21 @@ export class BoxingGame extends BaseGame {
     avatar.setProp('gloves');
     avatar.setOnline(true);
     this.scene.add(avatar.group);
+
+    createRiggedAvatar({
+      scene: this.scene,
+      color: '#94a3b8',
+      height: 1.95,
+      facing: 0,
+      autoPlay: true,
+    })
+      .then((rigged) => {
+        if (!rigged) return;
+        avatar._rigged = rigged;
+        avatar.setVisible(false);
+      })
+      .catch(() => {});
+
     return avatar;
   }
 
@@ -208,7 +279,7 @@ export class BoxingGame extends BaseGame {
       baseZ: isPlayer ? 0.95 : -1.25,
       x: 0,
       z: isPlayer ? 0.95 : -1.25,
-      facing: isPlayer ? Math.PI : 0, // Face each other
+      facing: isPlayer ? Math.PI : 0,
       hp: MAX_HP,
       stamina: 100,
       roundWins: 0,
@@ -218,6 +289,10 @@ export class BoxingGame extends BaseGame {
       lunge: 0,
       flash: 0,
       recoil: { x: 0, y: 0, z: 0, rotX: 0, rotY: 0, rotZ: 0 },
+      bounceVelZ: 0,
+      bounceT: 0,
+      dizzyStars: this.#createDizzyStars(),
+      dizzyAngle: 0,
       koProgress: 0,
       punchAnim: { active: false, hand: 'R', timer: 0 },
       score: 0,
@@ -248,7 +323,7 @@ export class BoxingGame extends BaseGame {
       baseZ: -1.25,
       x: 0,
       z: -1.25,
-      facing: 0, // Face player head-on
+      facing: 0,
       hp: MAX_HP,
       stamina: 100,
       roundWins: 0,
@@ -258,6 +333,10 @@ export class BoxingGame extends BaseGame {
       lunge: 0,
       flash: 0,
       recoil: { x: 0, y: 0, z: 0, rotX: 0, rotY: 0, rotZ: 0 },
+      bounceVelZ: 0,
+      bounceT: 0,
+      dizzyStars: this.#createDizzyStars(),
+      dizzyAngle: 0,
       koProgress: 0,
       punchAnim: { active: false, hand: 'R', timer: 0 },
       score: 0,
@@ -294,6 +373,9 @@ export class BoxingGame extends BaseGame {
     this.introTick = 0;
     this.message = `ROUND ${this.round}`;
     this.messageSub = 'Raise your gloves · High guard';
+    this.botState = 'idle';
+    this.botNextPunch = 2.6;
+
     this.fighters.forEach((f) => {
       f.hp = MAX_HP;
       f.stamina = 100;
@@ -302,6 +384,8 @@ export class BoxingGame extends BaseGame {
       f.lunge = 0;
       f.blocking = 0;
       f.recoil = { x: 0, y: 0, z: 0, rotX: 0, rotY: 0, rotZ: 0 };
+      f.bounceVelZ = 0;
+      f.bounceT = 0;
       f.koProgress = 0;
       f.punchAnim = { active: false, hand: 'R', timer: 0 };
       f.combo = 0;
@@ -314,7 +398,7 @@ export class BoxingGame extends BaseGame {
     this.phase = 'fight';
     this.phaseTimer = ROUND_TIME;
     this.message = 'FIGHT!';
-    this.messageSub = 'Throw punches at the bot · duck & block!';
+    this.messageSub = 'Cover face to block · snap punches through!';
     this.ctx.audio.play('go');
     this.ctx.engine.shake(0.12, 0.25);
   }
@@ -337,12 +421,17 @@ export class BoxingGame extends BaseGame {
   }
 
   endMatch() {
-    const winner = this.fighters.find((f) => f.roundWins >= ROUNDS_TO_WIN);
+    const winner = this.fighters.find((f) => f.roundWins >= ROUNDS_TO_WIN) || this.fighters[0];
     this.phase = 'matchEnd';
-    this.phaseTimer = 6;
+    this.phaseTimer = 9999; // Do NOT auto-loop! Stay at victory celebration!
     this.matchWinner = winner;
-    this.message = winner ? `${winner.name.toUpperCase()} WINS!` : 'DRAW';
-    this.messageSub = this.queue.length ? 'Next challenger steps up...' : 'Champion performance!';
+
+    const isPlayerWin = winner && !winner.isBot;
+    this.message = isPlayerWin ? '🏆 YOU WIN! CHAMPION!' : `${winner.name.toUpperCase()} WINS!`;
+    this.messageSub = isPlayerWin
+      ? 'Crowd roaring · Arena flashes · Victory recorded in profile!'
+      : 'Good fight · Wave or hold to restart';
+
     this.results = this.fighters
       .map((f) => ({
         name: f.name,
@@ -352,8 +441,30 @@ export class BoxingGame extends BaseGame {
         gained: f.score,
       }))
       .sort((a, b) => b.rank - a.rank || b.gained - a.gained);
-    this.ctx.audio.play('ko');
-    this.fx.confetti({ x: 0, y: 2.5, z: 0 }, 120);
+
+    this.ctx.audio.play('cheer');
+    this.fx.confetti({ x: 0, y: 2.2, z: 0 }, 140);
+
+    // Record win in persistent player profile
+    if (isPlayerWin && winner.p && winner.p.profile) {
+      winner.p.profile.wins = (winner.p.profile.wins || 0) + 1;
+      winner.p.profile.games = (winner.p.profile.games || 0) + 1;
+      winner.p.profile.level = Math.floor(winner.p.profile.wins / 3) + 1;
+      try {
+        const key = 'arfg_profiles_v2';
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const list = JSON.parse(raw);
+          const found = list.find((x) => x.id === winner.p.profile.id);
+          if (found) {
+            found.wins = winner.p.profile.wins;
+            found.games = winner.p.profile.games;
+            found.level = winner.p.profile.level;
+            localStorage.setItem(key, JSON.stringify(list));
+          }
+        }
+      } catch {}
+    }
   }
 
   update(dt) {
@@ -373,7 +484,7 @@ export class BoxingGame extends BaseGame {
       if (this.phase === 'fight') {
         for (const e of events) {
           if (e.type === 'punch') {
-            // Trigger first-person glove punch animation
+            // First-person glove animation
             if (f.side === 0) {
               if (e.hand === 'L' && this.fpGloveL) this.fpGloveL.punchT = 1.0;
               else if (this.fpGloveR) this.fpGloveR.punchT = 1.0;
@@ -427,30 +538,7 @@ export class BoxingGame extends BaseGame {
       }
     } else if (this.phase === 'matchEnd') {
       this.updateFighters(dt, true);
-      if (this.phaseTimer <= 0) {
-        const winner = this.matchWinner;
-        const next = this.queue.shift();
-        if (next && winner) {
-          const loser = this.fighters.find((f) => f !== winner);
-          if (loser?.p) {
-            this.queue.unshift(loser.p);
-            loser.p.avatar.setVisible(false);
-          }
-          this.fighters = [winner, this.#makeFighter(next, 1)];
-          this.fighters[0].side = 0;
-          this.fighters[1].side = 1;
-          for (const f of this.fighters) {
-            f.roundWins = 0;
-            f.avatar.setVisible(true);
-          }
-          this.round = 1;
-          this.matchWinner = null;
-          this.beginRound();
-        } else {
-          this.queue = this.fighters.filter((f) => f.p).map((f) => f.p);
-          this.beginMatch();
-        }
-      }
+      this.#updateCameraFlashes(dt);
     }
 
     this.updateCamera();
@@ -469,7 +557,7 @@ export class BoxingGame extends BaseGame {
       }
 
       // Bot weaving
-      if (f.isBot && !frozen && f.hp > 0) {
+      if (f.isBot && !frozen && f.hp > 0 && this.botState !== 'windup') {
         targetX = f.baseX + Math.sin(this.time * 2.2) * 0.34;
         targetZ = f.baseZ + Math.cos(this.time * 1.5) * 0.14;
       }
@@ -477,16 +565,27 @@ export class BoxingGame extends BaseGame {
       f.x = damp(f.x, targetX, 7, dt);
       f.z = damp(f.z, targetZ, 5, dt);
       f.lunge = damp(f.lunge, 0, 8, dt);
+
+      // Face block detection
       f.blocking = f.p ? f.p.motion.block : f.isBot ? (performance.now() < this.botBlockUntil ? 1 : 0) : 0;
 
-      // Spring-recoil kinematics recovery
+      // Elastic bounce recoil spring
+      if (f.bounceVelZ) {
+        f.bounceT += dt;
+        f.recoil.z += f.bounceVelZ * Math.cos(f.bounceT * 12) * Math.exp(-f.bounceT * 4.5) * dt;
+        if (f.bounceT > 0.8) f.bounceVelZ = 0;
+      }
+
       f.recoil.z = damp(f.recoil.z, 0, 8.5, dt);
       f.recoil.rotX = damp(f.recoil.rotX, 0, 9.5, dt);
       f.recoil.rotY = damp(f.recoil.rotY, 0, 10, dt);
       f.recoil.rotZ = damp(f.recoil.rotZ, 0, 10, dt);
       f.recoil.y = damp(f.recoil.y, 0, 8, dt);
 
-      // KO Collapse kinematics
+      // Comic dizzy stars when HP <= 25% (75% damaged)
+      this.#updateDizzyStars(f, dt);
+
+      // KO Collapse
       if (f.hp <= 0) {
         f.koProgress = clamp(f.koProgress + dt * 2.5, 0, 1);
         f.recoil.rotX = lerp(f.recoil.rotX, -Math.PI / 2, f.koProgress);
@@ -500,7 +599,6 @@ export class BoxingGame extends BaseGame {
 
       if (f.p) {
         this.place(f.p, posX, posZ, { y: posY, facing });
-        // In first person view, hide player 1 avatar so it doesn't obstruct view
         if (f.side === 0) {
           f.avatar.setVisible(this.viewMode === 'chase');
         }
@@ -513,14 +611,68 @@ export class BoxingGame extends BaseGame {
         f.avatar.seated = false;
         f.avatar.update(null, null, dt, { active: false });
 
-        if (f.avatar.headGroup) {
+        if (f.avatar.headGroup && f.hp > 25) {
           f.avatar.headGroup.rotation.x = damp(f.avatar.headGroup.rotation.x, 0, 11, dt);
+        }
+
+        if (f.avatar._rigged) {
+          f.avatar._rigged.setPosition(posX, posY, posZ);
+          f.avatar._rigged.setFacing(facing + f.recoil.rotY);
+          f.avatar._rigged.update(dt);
         }
       }
 
-      // Emissive suit intensity on hit
       if (f.avatar.accentMat) {
         f.avatar.accentMat.emissiveIntensity = 0.9 + f.flash * 2.8;
+      }
+    }
+  }
+
+  #updateDizzyStars(f, dt) {
+    if (!f.dizzyStars) return;
+    const isDizzy = f.hp > 0 && f.hp <= 25;
+    f.dizzyStars.group.visible = isDizzy;
+    if (!isDizzy) return;
+
+    f.dizzyAngle = (f.dizzyAngle || 0) + dt * 4.5;
+    const headY = 1.82;
+    f.dizzyStars.group.position.set(f.x + f.recoil.x, headY + Math.sin(this.time * 6) * 0.04, f.z + f.recoil.z);
+
+    const rx = 0.35;
+    const rz = 0.22;
+    for (let i = 0; i < f.dizzyStars.stars.length; i++) {
+      const theta = f.dizzyAngle + (i * Math.PI * 2) / f.dizzyStars.stars.length;
+      const s = f.dizzyStars.stars[i];
+      s.position.set(Math.cos(theta) * rx, Math.sin(theta * 2) * 0.04, Math.sin(theta) * rz);
+      s.rotation.y += dt * 6;
+      s.rotation.z += dt * 4;
+    }
+
+    if (f.avatar?.headGroup) {
+      f.avatar.headGroup.rotation.z = Math.sin(this.time * 6) * 0.18;
+      f.avatar.headGroup.rotation.x = Math.cos(this.time * 5) * 0.14;
+    }
+
+    if (Math.random() < 0.012) {
+      this.ctx.audio.play('dizzy');
+    }
+  }
+
+  #updateCameraFlashes(dt) {
+    if (this.phase !== 'matchEnd' || !this.matchWinner) {
+      for (const f of this.cameraFlashes) {
+        f.light.intensity = 0;
+      }
+      return;
+    }
+
+    for (const f of this.cameraFlashes) {
+      if (f.flashTimer > 0) {
+        f.flashTimer -= dt;
+        f.light.intensity = Math.max(0, f.flashTimer * 18);
+      } else if (Math.random() < 0.08) {
+        f.flashTimer = 0.12 + Math.random() * 0.08;
+        f.light.intensity = 3.5;
       }
     }
   }
@@ -528,17 +680,19 @@ export class BoxingGame extends BaseGame {
   tryHit(attacker, defender, e) {
     if (!defender || this.phase !== 'fight') return;
     const now = performance.now();
-    if (now - attacker.lastHitAt < 180) return;
+    if (now - attacker.lastHitAt < 160) return;
     attacker.lastHitAt = now;
     attacker.punches++;
 
+    const isHard = e.hardHit || e.power > 1.05;
+    const zone = e.zone || (Math.random() < 0.65 ? 'head' : 'torso');
     const quality = clamp(Number(e.quality ?? e.power ?? 0.7), 0, 1);
-    const momentum = clamp(Number(e.momentum ?? quality), 0, 1.35);
-    const reach = Number(e.reach) || 1.15;
+    const momentum = clamp(Number(e.momentum ?? quality), 0, 1.45);
+    const power = clamp(Number(e.power) || (isHard ? 1.2 : 0.85), 0.2, 1.5);
     const dist = Math.hypot(attacker.x - defender.x, attacker.z - defender.z);
-    const range = 2.85 + Math.max(0, reach - 1) * 0.9;
+    const range = 2.85 + Math.max(0, (e.reach || 1) - 1) * 0.9;
 
-    attacker.lunge = 0.2 + quality * 0.12;
+    attacker.lunge = (isHard ? 0.28 : 0.2) + quality * 0.12;
 
     if (dist > range + 0.5) {
       attacker.misses++;
@@ -546,7 +700,7 @@ export class BoxingGame extends BaseGame {
       attacker.combo = 0;
       this.combo = 0;
       this.message = 'OUT OF RANGE!';
-      this.messageSub = 'Step into the ring and punch through the target';
+      this.messageSub = 'Step forward and punch through the target';
       this.ctx.audio.play('whoosh');
       this.fx.burst({ x: defender.x, y: 1.3, z: defender.z }, '#64748b', 8, { speed: 1.5, life: 0.35 });
       return;
@@ -569,24 +723,20 @@ export class BoxingGame extends BaseGame {
       return;
     }
 
-    // Low-quality arm flails can still miss. Clean, fast punches with body
-    // rotation are the ones that land reliably, so hit rate now means
-    // something instead of every twitch dealing damage.
     const accuracyChance = clamp(
-      0.48 + quality * 0.46 + momentum * 0.1 - Math.max(0, dist - 2.3) * 0.06,
-      0.18,
+      0.52 + quality * 0.45 + momentum * 0.1 - Math.max(0, dist - 2.3) * 0.06,
+      0.22,
       0.98
     );
-    const weak = quality < 0.22;
+    const weak = quality < 0.18;
     if (weak || Math.random() > accuracyChance) {
       attacker.misses++;
       this.#refreshAccuracy(attacker);
       attacker.combo = 0;
       this.combo = 0;
-      this.message = weak ? 'TOO WEAK!' : 'MISS!';
-      this.messageSub = 'Drive from your hips · snap the punch through';
+      this.message = weak ? 'TOO WEAK!' : 'GLANCING MISS!';
+      this.messageSub = 'Extend your arm fully · Drive from your body';
       this.ctx.audio.play('whoosh');
-      this.fx.burst({ x: defender.x, y: 1.35, z: defender.z }, '#64748b', 7, { speed: 1.6, life: 0.3 });
       return;
     }
 
@@ -597,14 +747,15 @@ export class BoxingGame extends BaseGame {
     this.lastComboAt = now;
     const comboBonus = 1 + Math.min(attacker.combo - 1, 5) * 0.16;
 
-    const power = clamp(Number(e.power) || 0.85, 0.2, 1.35);
-    let dmg = (6 + power * 12 + quality * 4) * (0.9 + momentum * 0.2) * comboBonus;
-    if (blocking) dmg *= 0.15;
+    let dmg = (isHard ? 14 : 7 + power * 10 + quality * 5) * (0.9 + momentum * 0.25) * comboBonus;
+    if (zone === 'head') dmg *= 1.25; // Precision headshots deal bonus damage
+    if (blocking) dmg *= 0.05; // Shield block absorbs 95% of damage!
 
     const points = Math.round(
-      (30 + power * 70 + momentum * 55 + quality * 35) * comboBonus * (blocking ? 0.25 : 1)
+      (40 + power * 75 + momentum * 55 + (isHard ? 50 : 0)) * comboBonus * (blocking ? 0.2 : 1)
     );
     attacker.score += points;
+
     if (blocking) {
       attacker.blocked++;
       attacker.combo = 0;
@@ -618,52 +769,70 @@ export class BoxingGame extends BaseGame {
     defender.hp = clamp(defender.hp - dmg, 0, MAX_HP);
     defender.flash = 1;
 
-    // Real impact kinematics on defender, scaled by punch momentum.
-    const impact = 1 + momentum * 0.35;
-    defender.recoil.z = -0.55 * power * impact;
-    defender.recoil.rotX = -0.42 * power * impact;
-    defender.recoil.rotY = (e.hand === 'L' ? -0.38 : 0.38) * power * impact;
-    defender.recoil.rotZ = (e.hand === 'L' ? 0.28 : -0.28) * power * impact;
-    defender.recoil.y = 0.08 * power * impact;
-    if (defender.avatar?.headGroup) {
-      defender.avatar.headGroup.rotation.x = -0.6 * power * impact;
-    }
-    defender.avatar?.flashVisor?.(0.25);
-    defender.avatar?.flash?.(blocking ? '#94a3b8' : '#ef4444', 0.28);
+    // Distinct Impact Kinetics: Head vs Torso & Elastic Bounce
+    const impact = (1 + momentum * 0.4) * (isHard ? 1.35 : 1.0);
+    defender.bounceVelZ = -1.4 * power * impact;
+    defender.bounceT = 0;
 
     const hitPos = {
       x: defender.x + (e.hand === 'L' ? 0.12 : -0.12),
-      y: 1.45,
+      y: zone === 'head' ? 1.62 : 1.18,
       z: defender.z + 0.15,
     };
 
+    if (zone === 'head') {
+      defender.recoil.z = -0.6 * power * impact;
+      defender.recoil.rotX = -0.65 * power * impact;
+      defender.recoil.rotY = (e.hand === 'L' ? -0.45 : 0.45) * power * impact;
+      defender.recoil.rotZ = (e.hand === 'L' ? 0.35 : -0.35) * power * impact;
+      defender.recoil.y = 0.08 * power * impact;
+      if (defender.avatar?.headGroup) {
+        defender.avatar.headGroup.rotation.x = -0.9 * power * impact;
+        defender.avatar.headGroup.rotation.y = (e.hand === 'L' ? -0.4 : 0.4) * power;
+      }
+    } else {
+      // Body shot: torso hunches forward and body buckles
+      defender.recoil.z = -0.5 * power * impact;
+      defender.recoil.rotX = 0.45 * power * impact;
+      defender.recoil.rotY = (e.hand === 'L' ? -0.2 : 0.2) * power;
+      defender.recoil.y = -0.16 * power * impact;
+    }
+
+    defender.avatar?.flashVisor?.(0.28);
+    defender.avatar?.flash?.(blocking ? '#94a3b8' : '#ef4444', 0.28);
+
     if (blocking) {
       this.ctx.audio.play('block');
-      this.fx.ring(hitPos, '#38bdf8', 1.1, 0.3);
-      this.fx.burst(hitPos, '#cbd5e1', 12, { speed: 2.5, life: 0.35 });
-      this.message = 'BLOCKED!';
+      this.fx.ring(hitPos, '#38bdf8', 1.4, 0.35);
+      this.fx.burst(hitPos, '#cbd5e1', 14, { speed: 2.8, life: 0.35 });
+      this.message = 'SHIELD BLOCKED!';
+      this.messageSub = 'Clean guard deflection';
     } else {
-      this.ctx.audio.play('impact', {
-        hand: e.hand,
-        power,
-        quality,
-        momentum,
-        combo: attacker.combo,
-      });
+      // Pounding audio on every landed hit
+      this.ctx.audio.play('pounding', { power: isHard ? 1.4 : power });
+
       if (attacker.combo >= 3 && attacker.combo % 3 === 0) {
         this.ctx.audio.play('combo', { combo: attacker.combo });
       }
-      this.fx.burst(hitPos, attacker.color || '#ef4444', Math.round(18 + quality * 22 + momentum * 10), {
-        speed: 3.4 + power * 2.2,
-        life: 0.42 + quality * 0.2,
+
+      this.fx.burst(hitPos, attacker.color || '#ef4444', Math.round(20 + quality * 22 + (isHard ? 15 : 0)), {
+        speed: 3.5 + power * 2.5,
+        life: 0.45 + quality * 0.2,
       });
-      this.fx.ring(hitPos, attacker.color || '#ef4444', 1.2 + quality * 0.5, 0.35);
-      this.ctx.engine.shake(0.16 + power * 0.14, 0.18);
-      if (attacker.combo >= 2) this.message = `COMBO x${attacker.combo}!`;
-      else if (quality > 0.82) this.message = 'PERFECT!';
-      else this.message = power > 0.9 ? 'HEAVY HIT!' : 'HIT!';
+      this.fx.ring(hitPos, isHard ? '#fbbf24' : (attacker.color || '#ef4444'), 1.3 + quality * 0.6, 0.35);
+
+      if (isHard) {
+        this.ctx.engine.shake(0.38, 0.25);
+        this.message = zone === 'head' ? '💥 HARD HIT TO HEAD!' : '⚡ BRUTAL BODY SHOT!';
+      } else if (attacker.combo >= 2) {
+        this.ctx.engine.shake(0.22, 0.18);
+        this.message = `COMBO x${attacker.combo}! (${zone.toUpperCase()})`;
+      } else {
+        this.ctx.engine.shake(0.18, 0.15);
+        this.message = zone === 'head' ? 'HEAD SHOT!' : 'BODY SHOT!';
+      }
+      this.messageSub = `${Math.round(defender.hp)} HP · +${points} pts`;
     }
-    this.messageSub = `${Math.round(defender.hp)} HP · +${points} pts`;
 
     if (defender.hp <= 0) {
       this.endRound(attacker, 'KNOCKOUT!');
@@ -674,67 +843,93 @@ export class BoxingGame extends BaseGame {
 
   updateBot(dt) {
     const bot = this.fighters.find((f) => f.isBot);
-    if (!bot || bot.hp <= 0) return;
+    const target = this.fighters.find((f) => !f.isBot);
+    if (!bot || bot.hp <= 0 || !target || target.hp <= 0 || this.phase !== 'fight') return;
 
     bot.stamina = clamp(bot.stamina + dt * 10, 0, 100);
-    this.botNextPunch -= dt;
 
-    if (this.botNextPunch <= 0 && this.phase === 'fight') {
-      this.botNextPunch = 1.35 + Math.random() * 1.5;
-      const target = this.fighters.find((f) => !f.isBot);
-      if (target && target.hp > 0) {
-        if (Math.random() < 0.22) {
-          this.botBlockUntil = performance.now() + 550;
-          this.message = 'BOT GUARDS!';
+    if (this.botState === 'windup') {
+      this.botWindupTimer -= dt;
+      bot.lunge = -0.16;
+      bot.recoil.rotX = -0.14;
+      bot.avatar?.flashVisor?.(0.85);
+
+      if (this.botWindupTimer <= 0) {
+        this.botState = 'strike';
+        bot.lunge = 0.42;
+
+        const isDucking = target.p?.motion?.duck > 0.38;
+        const isLeaning = target.p?.motion?.lean && Math.abs(target.p.motion.lean) > 0.52;
+        const kickDodging = performance.now() < (target._kickDodgeUntil || 0);
+
+        if (kickDodging || isDucking || isLeaning) {
+          this.message = kickDodging ? 'KICK-DODGED!' : isDucking ? 'DUCKED UNDER!' : 'SLIPPED!';
+          this.messageSub = '⚡ COUNTER WINDOW OPEN!';
+          this.ctx.audio.play('whoosh');
+          this.botState = 'recovery';
+          this.botRecoveryTimer = 1.25;
+          return;
+        }
+
+        const isBlocked = target.blocking > 0.5;
+        const baseDmg = 8 + Math.random() * 7;
+        const dmg = isBlocked ? 0 : baseDmg; // Full shield block negates damage!
+        target.hp = clamp(target.hp - dmg, 0, MAX_HP);
+        target.flash = 1;
+
+        if (isBlocked) {
+          this.ctx.audio.play('block');
+          this.ctx.engine.shake(0.12, 0.18);
+          this.message = '🛡️ SHIELD BLOCKED!';
+          this.messageSub = 'Perfect guard - 0 damage taken';
+          this.botState = 'recovery';
+          this.botRecoveryTimer = 1.0;
         } else {
-          // Bot attacks
-          bot.lunge = 0.32;
-          const kickDodging = performance.now() < (target._kickDodgeUntil || 0);
-          const ducking = target.p?.motion?.duck > 0.38;
-          const leaning = target.p?.motion?.lean && Math.abs(target.p.motion.lean) > 0.52;
+          this.camRecoilZ = 0.45;
+          this.camRecoilRot = (Math.random() - 0.5) * 0.22;
+          this.ctx.audio.play('pounding', { power: 1.1 });
+          this.ctx.engine.shake(0.38, 0.28);
 
-          if (kickDodging || ducking || leaning) {
-            this.message = kickDodging ? 'KICK-DODGED!' : ducking ? 'DUCKED UNDER!' : 'SLIPPED!';
-            this.messageSub = 'COUNTER WINDOW!';
-            this.ctx.audio.play('whoosh');
-            return;
+          const flash = document.getElementById('flash');
+          if (flash) {
+            flash.style.background = 'rgba(239, 68, 68, 0.45)';
+            flash.style.opacity = '1';
+            setTimeout(() => {
+              flash.style.opacity = '0';
+              flash.style.background = '#fff';
+            }, 180);
           }
 
-          const dmg = 7 + Math.random() * 8;
-          const blocked = target.blocking > 0.5;
-          target.hp = clamp(target.hp - dmg * (blocked ? 0.15 : 1), 0, MAX_HP);
-          target.flash = 1;
+          this.message = 'BOT LANDS HIT!';
+          this.messageSub = `${Math.round(target.hp)} HP remaining`;
 
-          if (blocked) {
-            this.ctx.audio.play('block');
-            this.ctx.engine.shake(0.12, 0.18);
-            this.message = 'BLOCKED!';
-            this.messageSub = `${Math.round(target.hp)} HP`;
-          } else {
-            // First person screen flinch & impact feedback
-            this.camRecoilZ = 0.38;
-            this.camRecoilRot = (Math.random() - 0.5) * 0.15;
-            this.ctx.audio.play('punch');
-            this.ctx.engine.shake(0.36, 0.25);
+          this.botState = 'recovery';
+          this.botRecoveryTimer = 0.9;
+        }
 
-            // Red screen impact flash
-            const flash = document.getElementById('flash');
-            if (flash) {
-              flash.style.background = 'rgba(239, 68, 68, 0.42)';
-              flash.style.opacity = '1';
-              setTimeout(() => {
-                flash.style.opacity = '0';
-                flash.style.background = '#fff';
-              }, 160);
-            }
-
-            this.message = 'BOT HITS!';
-            this.messageSub = `${Math.round(target.hp)} HP`;
-          }
-
-          if (target.hp <= 0) {
-            this.endRound(bot, 'KNOCKOUT!');
-          }
+        if (target.hp <= 0) {
+          this.endRound(bot, 'KNOCKOUT!');
+        }
+      }
+    } else if (this.botState === 'recovery') {
+      this.botRecoveryTimer -= dt;
+      if (this.botRecoveryTimer <= 0) {
+        this.botState = 'idle';
+        this.botNextPunch = 2.0 + Math.random() * 2.2;
+      }
+    } else {
+      // Idle & weaving
+      this.botNextPunch -= dt;
+      if (this.botNextPunch <= 0) {
+        if (Math.random() < 0.25) {
+          this.botBlockUntil = performance.now() + 650;
+          this.message = 'BOT GUARDS!';
+          this.botNextPunch = 1.5 + Math.random() * 1.5;
+        } else {
+          this.botState = 'windup';
+          this.botWindupTimer = 0.65; // 650ms telegraph warning
+          this.ctx.audio.play('telegraph');
+          this.message = '⚠️ BOT WINDING UP! (BLOCK OR DUCK!)';
         }
       }
     }
@@ -748,24 +943,31 @@ export class BoxingGame extends BaseGame {
     this.fpGloveL.punchT = Math.max(0, this.fpGloveL.punchT - dt * 3.8);
     this.fpGloveR.punchT = Math.max(0, this.fpGloveR.punchT - dt * 3.8);
 
-    const blockLift = f0.blocking > 0.5 ? 0.15 : 0;
-    const blockIn = f0.blocking > 0.5 ? 0.12 : 0;
+    const isBlocking = f0.blocking > 0.5;
 
-    // Left glove punch thrust
-    const lProg = Math.sin(this.fpGloveL.punchT * Math.PI);
-    this.fpGloveL.group.position.set(
-      this.fpGloveL.restPos.x + blockIn + lProg * 0.08,
-      this.fpGloveL.restPos.y + blockLift + lProg * 0.18,
-      this.fpGloveL.restPos.z - lProg * 1.25
-    );
+    if (isBlocking) {
+      // High Guard Face Cover position
+      this.fpGloveL.group.position.set(-0.11, -0.04, -0.48);
+      this.fpGloveR.group.position.set(0.11, -0.04, -0.48);
+      this.fpGloveL.group.rotation.set(0.3, 0.35, 0.18);
+      this.fpGloveR.group.rotation.set(0.3, -0.35, -0.18);
+    } else {
+      const lProg = Math.sin(this.fpGloveL.punchT * Math.PI);
+      this.fpGloveL.group.position.set(
+        this.fpGloveL.restPos.x + lProg * 0.08,
+        this.fpGloveL.restPos.y + lProg * 0.18,
+        this.fpGloveL.restPos.z - lProg * 1.25
+      );
+      this.fpGloveL.group.rotation.set(0, 0, 0);
 
-    // Right glove punch thrust
-    const rProg = Math.sin(this.fpGloveR.punchT * Math.PI);
-    this.fpGloveR.group.position.set(
-      this.fpGloveR.restPos.x - blockIn - rProg * 0.08,
-      this.fpGloveR.restPos.y + blockLift + rProg * 0.18,
-      this.fpGloveR.restPos.z - rProg * 1.25
-    );
+      const rProg = Math.sin(this.fpGloveR.punchT * Math.PI);
+      this.fpGloveR.group.position.set(
+        this.fpGloveR.restPos.x - rProg * 0.08,
+        this.fpGloveR.restPos.y + rProg * 0.18,
+        this.fpGloveR.restPos.z - rProg * 1.25
+      );
+      this.fpGloveR.group.rotation.set(0, 0, 0);
+    }
 
     this.fpGroup.position.copy(this.ctx.camera.position);
     this.fpGroup.quaternion.copy(this.ctx.camera.quaternion);
@@ -788,14 +990,12 @@ export class BoxingGame extends BaseGame {
     const botZ = opponent.z;
 
     if (this.viewMode === 'fp') {
-      // First-Person POV: Eye level, looking straight into opponent's face
       const eyeX = camX + camLean;
       const eyeY = 1.6 + camDuck;
       const eyeZ = 1.05 + this.camRecoilZ;
       this.setCamera([eyeX, eyeY, eyeZ], [botX, botY, botZ], 58);
       this.ctx.camera.rotation.z += this.camRecoilRot;
     } else {
-      // Over-the-Shoulder: Camera behind player 1, full front view of opponent
       const chaseX = camX * 0.5 + camLean * 0.4;
       const chaseY = 2.05 + camDuck * 0.3;
       const chaseZ = 2.65 + this.camRecoilZ;
@@ -830,6 +1030,7 @@ export class BoxingGame extends BaseGame {
       score: scoreLine,
       message: this.message,
       messageSub: this.messageSub,
+      winnerId: this.matchWinner?.p?.id || null,
       big: this.phase === 'intro' ? { text: `${Math.max(1, Math.ceil(this.phaseTimer))}`, sub: 'ROUND ' + this.round } : null,
       players,
       results:
@@ -842,9 +1043,19 @@ export class BoxingGame extends BaseGame {
 
   dispose() {
     window.removeEventListener('keydown', this.onKey);
+    if (this.bot?._rigged) {
+      this.bot._rigged.dispose();
+      this.bot._rigged = null;
+    }
     if (this.bot) this.bot.dispose();
     if (this.fpGroup) {
       this.fpGroup.removeFromParent();
+    }
+    for (const f of this.fighters) {
+      f.dizzyStars?.group?.removeFromParent();
+    }
+    for (const cf of this.cameraFlashes) {
+      cf.light?.removeFromParent();
     }
     super.dispose();
   }

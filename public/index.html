@@ -62,6 +62,14 @@
             <span class="attract-icon">🎱</span>
             <div><strong>Balling</strong><small>Hold · aim · push the rack</small></div>
           </article>
+          <article class="attract-card" data-game-id="bowling" style="--accent: #f59e0b">
+            <span class="attract-icon">🎳</span>
+            <div><strong>Bowling</strong><small>Swing · aim · 10-pin strike</small></div>
+          </article>
+          <article class="attract-card" data-game-id="archery" style="--accent: #ef4444">
+            <span class="attract-icon">🎯</span>
+            <div><strong>Archery</strong><small>Aim · draw · bullseye</small></div>
+          </article>
         </div>
 
         <div id="attract-players" class="attract-players" aria-live="polite">
@@ -160,6 +168,7 @@
         <span class="pip-dot"></span>
         <span class="pip-title">LIVE TRACKING</span>
         <span id="pip-count" class="pip-count">0 / 4</span>
+        <button id="pip-calibrate-btn" class="pip-size-btn" title="Re-center reach calibration for side camera (R)">🎯</button>
         <button id="pip-size-btn" class="pip-size-btn" title="Toggle view size: Compact · Large · Fullscreen Overlay (V)">⤢</button>
       </div>
       <canvas id="pip-canvas" width="480" height="270"></canvas>
@@ -181,6 +190,87 @@
         <h2>GOODBYE!</h2>
         <p>AR Family Games has shut down.</p>
         <small>You can safely close this window.</small>
+      </div>
+    </div>
+
+    <!-- Dominant Hand Selection Modal (Xbox Kinect style) ------------->
+    <div id="dominant-hand-modal" class="kinect-modal-overlay" hidden>
+      <div class="kinect-modal-card dominant-card">
+        <div class="modal-badge">KINECT SETUP</div>
+        <h2>SELECT DOMINANT HAND</h2>
+        <p class="modal-sub">Extend your dominant playing hand forward toward the screen</p>
+        <div class="hand-selection-cards">
+          <div id="hand-opt-left" class="hand-opt-card" data-hand="L">
+            <div class="hand-reach-ring">
+              <svg viewBox="0 0 100 100">
+                <circle class="ring-track" cx="50" cy="50" r="42"></circle>
+                <circle id="reach-ring-left" class="ring-progress" cx="50" cy="50" r="42"></circle>
+              </svg>
+              <span class="hand-icon">🤚</span>
+            </div>
+            <h3>LEFT HAND</h3>
+            <span class="hand-hint">Extend Left Arm</span>
+          </div>
+          <div id="hand-opt-right" class="hand-opt-card" data-hand="R">
+            <div class="hand-reach-ring">
+              <svg viewBox="0 0 100 100">
+                <circle class="ring-track" cx="50" cy="50" r="42"></circle>
+                <circle id="reach-ring-right" class="ring-progress" cx="50" cy="50" r="42"></circle>
+              </svg>
+              <span class="hand-icon">✋</span>
+            </div>
+            <h3>RIGHT HAND</h3>
+            <span class="hand-hint">Extend Right Arm</span>
+          </div>
+        </div>
+        <div class="modal-footer-hint">Touch, click or reach forward with either hand to confirm</div>
+      </div>
+    </div>
+
+    <!-- Kinect Pause Modal (Both arms overhead ||) -------------------->
+    <div id="pause-modal" class="kinect-modal-overlay" hidden>
+      <div class="kinect-modal-card pause-card">
+        <div class="pause-header">
+          <span class="pause-symbol">⏸</span>
+          <h2>GAME PAUSED</h2>
+        </div>
+        <p class="modal-sub">Hold both hands overhead parallel <strong class="code-pill">||</strong> to resume or use controls</p>
+        <div id="pause-stats" class="pause-stats"></div>
+        <div class="pause-actions">
+          <button id="btn-pause-resume" class="btn primary pause-btn">
+            <span>▶</span> RESUME GAME
+          </button>
+          <button id="btn-pause-hand" class="btn secondary pause-btn">
+            <span>✋</span> SWITCH DOMINANT HAND
+          </button>
+          <button id="btn-pause-home" class="btn danger pause-btn">
+            <span>🏠</span> EXIT TO HOME
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Player 2 Drop-In Confirmation Modal -------------------------->
+    <div id="player-join-modal" class="kinect-modal-overlay" hidden>
+      <div class="kinect-modal-card join-card">
+        <div class="modal-badge accent">NEW PLAYER DETECTED</div>
+        <h2><span id="join-p2-name">PLAYER 2</span> WANTS TO JOIN!</h2>
+        <p class="modal-sub">Select how Player 2 should enter the active match:</p>
+        <div class="join-options">
+          <div id="opt-join-against" class="join-opt-card versus" data-choice="against">
+            <span class="join-icon">⚔️</span>
+            <h3>PLAY AGAINST</h3>
+            <p>(1v1 Head-to-Head Duel)</p>
+            <span class="join-gesture-hint">Hold Left Arm out</span>
+          </div>
+          <div id="opt-join-with" class="join-opt-card coop" data-choice="with">
+            <span class="join-icon">🤝</span>
+            <h3>PLAY WITH</h3>
+            <p>(Co-Op / Team / Doubles)</p>
+            <span class="join-gesture-hint">Hold Right Arm out</span>
+          </div>
+        </div>
+        <button id="btn-join-dismiss" class="btn ghost dismiss-btn">👁 Spectate / Keep Single Player</button>
       </div>
     </div>
 
