@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#04060f" />
+    <title>AR Family Games · Kinect Console</title>
+    <link rel="stylesheet" href="/styles/main.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070b16'/%3E%3Cpath d='M12 44 24 18l8 15 8-15 12 26' stroke='%2322d3ee' stroke-width='5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body class="display-page">
+    <video id="camera-video" playsinline muted hidden></video>
+    <canvas id="stage" aria-label="Game world"></canvas>
+
+    <!-- Attract / Home screen ----------------------------------------->
+    <section id="attract" class="attract">
+      <div class="attract-glow" aria-hidden="true"></div>
+      <div class="attract-inner">
+        <header class="attract-head">
+          <div class="attract-logo">
+            <span class="logo-ar">AR</span>
+            <span class="logo-family">FAMILY</span>
+            <span class="logo-games">GAMES</span>
+          </div>
+          <p class="attract-tagline">XBOX KINETIC LIVING ROOM ARENA</p>
+          <div id="profile-bar" class="profile-bar" aria-label="Active Player Profiles"></div>
+        </header>
+
+        <div class="attract-games" aria-label="Available games">
+          <article class="attract-card" data-game-id="boxing" style="--accent: #f472b6">
+            <span class="attract-icon">🥊</span>
+            <div><strong>Boxing</strong><small>Punch · block · kick dodge</small></div>
+          </article>
+          <article class="attract-card" data-game-id="tennis" style="--accent: #a3e635">
+            <span class="attract-icon">🎾</span>
+            <div><strong>Tennis</strong><small>Swing · aim · rally</small></div>
+          </article>
+          <article class="attract-card" data-game-id="sprint" style="--accent: #22d3ee">
+            <span class="attract-icon">🏃</span>
+            <div><strong>Sprint</strong><small>Run in place · three heats</small></div>
+          </article>
+          <article class="attract-card" data-game-id="hurdles" style="--accent: #fbbf24">
+            <span class="attract-icon">🏁</span>
+            <div><strong>Hurdles</strong><small>Run · jump · don't clip</small></div>
+          </article>
+          <article class="attract-card" data-game-id="boat" style="--accent: #38bdf8">
+            <span class="attract-icon">🚣</span>
+            <div><strong>Rowing</strong><small>Pull · steer · race</small></div>
+          </article>
+          <article class="attract-card" data-game-id="coaster" style="--accent: #fb923c">
+            <span class="attract-icon">🎢</span>
+            <div><strong>Coaster</strong><small>Steer · boost · duck</small></div>
+          </article>
+          <article class="attract-card" data-game-id="dance" style="--accent: #a78bfa">
+            <span class="attract-icon">🕺</span>
+            <div><strong>Dance</strong><small>Follow the coach · match the beat</small></div>
+          </article>
+        </div>
+
+        <div id="attract-players" class="attract-players" aria-live="polite">
+          <span class="wave-prompt">📷 Step into camera view to play (up to 4 players)</span>
+        </div>
+
+        <footer class="attract-foot">
+          <div class="attract-foot-row">
+            <div class="room-chip">
+              <span>ROOM</span>
+              <strong id="room-code">HOME</strong>
+            </div>
+            <button id="camera-toggle-btn" class="kinect-action-btn camera-btn" title="Toggle camera">
+              📷 Camera Active
+            </button>
+            <button id="gesture-exit-sys" class="kinect-action-btn exit-sys-btn" title="Hover to exit system completely">
+              <span class="action-icon">🛑</span>
+              <span class="action-text">EXIT SYSTEM</span>
+            </button>
+          </div>
+          <p class="attract-hint">
+            Raise your hand to browse games · Hover over a card to start
+            <span>Players are automatically recognized — no controllers needed!</span>
+          </p>
+        </footer>
+      </div>
+    </section>
+
+    <!-- In-game HUD ---------------------------------------------------->
+    <section id="hud" class="hud" hidden>
+      <div class="hud-topbar">
+        <div class="hud-topbar-left">
+          <button id="gesture-home-btn" class="kinect-action-btn home-btn" title="Hover to exit to home menu">
+            <span class="action-icon">🏠</span>
+            <span class="action-text">EXIT TO HOME</span>
+          </button>
+          <button id="gesture-view-btn" class="kinect-action-btn view-btn" title="Hover to toggle Camera View (POV / Chase)">
+            <span class="action-icon">🎥</span>
+            <span class="action-text" id="gesture-view-text">TOGGLE POV</span>
+          </button>
+        </div>
+        <div class="hud-brand"><span>AR</span> FAMILY GAMES</div>
+        <div class="hud-center">
+          <div id="hud-title" class="hud-title"></div>
+          <div id="hud-subtitle" class="hud-subtitle"></div>
+        </div>
+        <div class="hud-right">
+          <div id="hud-score" class="hud-score"></div>
+          <div id="hud-timer" class="hud-timer"></div>
+        </div>
+      </div>
+
+      <div class="hud-msg-wrap">
+        <div id="hud-message" class="hud-message"></div>
+        <div id="hud-message-sub" class="hud-message-sub"></div>
+      </div>
+
+      <div id="hud-big" class="hud-big" hidden>
+        <div class="big-text"></div>
+        <div class="big-sub"></div>
+      </div>
+
+      <div id="hud-queue" class="hud-queue"></div>
+      <div id="hud-results" class="hud-results" hidden></div>
+      <div id="hud-players" class="hud-players"></div>
+    </section>
+
+    <!-- Top Right Controls --------------------------------------------->
+    <div class="tv-topright">
+      <div id="view-badge" class="mini">VIEW AUTO</div>
+    </div>
+
+    <div class="tv-actions">
+      <button id="btn-cam-view" class="icon-btn" title="Toggle Camera Tracking Overlay (C)" aria-label="Camera View">📹</button>
+      <button id="btn-sound" class="icon-btn" title="Toggle sound" aria-label="Toggle sound">🔊</button>
+      <button id="btn-fullscreen" class="icon-btn" title="Fullscreen" aria-label="Fullscreen">⛶</button>
+    </div>
+
+    <div id="flash" class="flash" aria-hidden="true"></div>
+    <div id="toast" class="toast"></div>
+
+    <!-- Kinect Hand Cursor --------------------------------------------->
+    <div id="kinect-cursor" class="kinect-cursor" hidden>
+      <div class="kinect-cursor-halo"></div>
+      <svg class="kinect-cursor-ring" viewBox="0 0 60 60">
+        <circle class="ring-bg" cx="30" cy="30" r="26"></circle>
+        <circle class="ring-fill" cx="30" cy="30" r="26"></circle>
+      </svg>
+      <div class="kinect-cursor-hand">✋</div>
+      <div class="kinect-cursor-label">HOLD TO START</div>
+    </div>
+
+    <!-- Live Multi-Player Skeleton Tracking PIP ------------------------>
+    <div id="tv-tracking-pip" class="tv-tracking-pip">
+      <div class="pip-head">
+        <span class="pip-dot"></span>
+        <span class="pip-title">LIVE TRACKING</span>
+        <span id="pip-count" class="pip-count">0 / 4</span>
+        <button id="pip-size-btn" class="pip-size-btn" title="Toggle view size: Compact · Large · Fullscreen Overlay (V)">⤢</button>
+      </div>
+      <canvas id="pip-canvas" width="480" height="270"></canvas>
+      <div id="pip-status" class="pip-status">Starting camera…</div>
+    </div>
+
+    <div id="fatal" class="fatal" hidden>
+      <div class="fatal-card">
+        <h2>Something went wrong</h2>
+        <p class="fatal-msg"></p>
+        <button class="btn primary" onclick="location.reload()">Reload the console</button>
+      </div>
+    </div>
+
+    <!-- System Shutdown Splash ----------------------------------------->
+    <div id="shutdown-overlay" class="shutdown-overlay" hidden>
+      <div class="shutdown-card">
+        <span class="shutdown-icon">👋</span>
+        <h2>GOODBYE!</h2>
+        <p>AR Family Games has shut down.</p>
+        <small>You can safely close this window.</small>
+      </div>
+    </div>
+
+    <script type="module" src="/src/app/unified.js"></script>
+  </body>
+</html>

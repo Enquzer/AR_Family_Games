@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Runtime / editor noise
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.tmp
+*.bak
+
+# Local captures and test output
+captures/
+test-output/
+coverage/

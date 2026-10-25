@@ -1,0 +1,21 @@
+{
+  "name": "ar-family-games",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AR Family Games - camera-driven, hands-free multiplayer AR game engine for the living room",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "postinstall": "node scripts/vendor.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.18",
+    "three": "0.170.0",
+    "ws": "8.18.0"
+  }
+}

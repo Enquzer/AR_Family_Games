@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#04060f" />
+    <title>AR Family Games · Controller</title>
+    <link rel="stylesheet" href="/styles/main.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070b16'/%3E%3Cpath d='M12 44 24 18l8 15 8-15 12 26' stroke='%2322d3ee' stroke-width='5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body class="host-page">
+    <div class="bg-orbs" aria-hidden="true">
+      <span class="orb orb-a"></span>
+      <span class="orb orb-b"></span>
+      <span class="orb orb-c"></span>
+    </div>
+
+    <header class="topbar">
+      <a class="brand" href="/">
+        <span class="brand-mark">AR</span>
+        <span class="brand-text">
+          <strong>FAMILY GAMES</strong>
+          <small>living-room arena</small>
+        </span>
+      </a>
+
+      <div class="topbar-mid">
+        <div class="net-pill">
+          <span id="net-dot" class="dot bad"></span>
+          <span id="net-label">CONNECTING</span>
+        </div>
+        <div id="tv-pill" class="net-pill bad">
+          <span class="dot tv"></span>
+          <span id="tv-label">NO TV</span>
+        </div>
+      </div>
+
+      <div class="room-box">
+        <label for="room-input">ROOM</label>
+        <input id="room-input" maxlength="8" value="HOME" spellcheck="false" autocomplete="off" />
+        <button id="btn-room" class="btn ghost small" type="button">Join</button>
+      </div>
+    </header>
+
+    <main class="host-grid">
+      <!-- Camera ------------------------------------------------------->
+      <section class="panel camera-panel">
+        <div class="panel-head">
+          <div>
+            <h2>Camera</h2>
+            <p class="panel-sub">Track up to four players at once</p>
+          </div>
+          <div class="row">
+            <button id="btn-demo" class="btn ghost small" type="button">Demo players</button>
+            <button id="btn-camera" class="btn primary small" type="button">Start camera</button>
+          </div>
+        </div>
+
+        <div id="preview" class="preview">
+          <video id="video" playsinline muted autoplay></video>
+          <canvas id="overlay"></canvas>
+
+          <div id="preview-empty" class="preview-empty">
+            <div class="cam-icon">◎</div>
+            <strong>Camera off</strong>
+            <span>Start the camera to track players. No camera? Try demo players.</span>
+            <button id="btn-camera-cta" class="btn primary" type="button">Start camera</button>
+          </div>
+
+          <div class="preview-badges">
+            <span id="fps-badge" class="badge">0 FPS</span>
+            <span id="pose-badge" class="badge">0 PLAYERS</span>
+          </div>
+
+          <div class="tracking-hud">
+            <span id="tracking-status" class="tracking-status off">CAMERA OFF</span>
+            <span id="hand-status" class="hand-status">Start the camera to track hands</span>
+            <div class="wave-meter" aria-hidden="true"><i id="wave-fill"></i></div>
+          </div>
+
+          <div id="wave-hint" class="wave-hint" hidden>👋 Raise a hand and wave to join</div>
+
+          <div id="cal-overlay" class="cal-overlay" hidden>
+            <span id="cal-overlay-text">Click corner 1 of 4</span>
+          </div>
+        </div>
+
+        <div class="cam-status-row">
+          <span id="cam-status" class="cam-status">Camera off</span>
+          <span class="cam-hint">Right-click to cancel corner picking</span>
+        </div>
+
+        <div class="camera-controls">
+          <label class="field">
+            <span>Camera</span>
+            <select id="camera-select">
+              <option value="">Default camera</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>TV size</span>
+            <select id="tv-size">
+              <option value="43">43&quot;</option>
+              <option value="50">50&quot;</option>
+              <option value="55" selected>55&quot;</option>
+              <option value="65">65&quot;</option>
+              <option value="75">75&quot;</option>
+              <option value="85">85&quot;</option>
+            </select>
+          </label>
+          <label class="toggle">
+            <input id="mirror-toggle" type="checkbox" checked />
+            <span>Mirror controls</span>
+          </label>
+        </div>
+
+        <div class="cal-row">
+          <button id="btn-auto-cal" class="btn accent" type="button">Auto-calibrate TV</button>
+          <button id="btn-manual-cal" class="btn ghost" type="button">Pick corners</button>
+          <button id="btn-reset-cal" class="btn ghost small" type="button">Reset</button>
+        </div>
+        <p id="cal-status" class="hint warn">Quick setup active. Auto-calibrate for a true AR perspective.</p>
+
+        <div class="distance-row">
+          <label class="field">
+            <span>Stand at</span>
+            <select id="known-distance">
+              <option value="2">2 m</option>
+              <option value="3" selected>3 m</option>
+              <option value="4">4 m</option>
+              <option value="5">5 m</option>
+            </select>
+          </label>
+          <button id="btn-cal-fov" class="btn ghost small" type="button">Calibrate FOV</button>
+          <span id="view-status" class="view-status">VIEW AUTO · waiting for players</span>
+        </div>
+        <p class="hint">Wave at the camera to join. Stand at a measured distance and tap <strong>Calibrate FOV</strong> so avatar depth and perspective match your room.</p>
+      </section>
+
+      <!-- Games -------------------------------------------------------->
+      <section class="panel games-panel">
+        <div class="panel-head">
+          <div>
+            <h2>Choose a game</h2>
+            <p class="panel-sub">The TV runs the simulation</p>
+          </div>
+          <span id="display-state" class="state-chip">TV idle</span>
+        </div>
+
+        <div id="game-grid" class="game-grid"></div>
+
+        <div class="launch-row">
+          <button id="btn-start" class="btn primary big" type="button">Start game</button>
+          <button id="btn-stop" class="btn ghost big" type="button">Back to menu</button>
+        </div>
+
+        <div class="how-box">
+          <h3 id="how-title">How it works</h3>
+          <p id="how-text">Pick a game, stand in front of the TV and use your body as the controller.</p>
+        </div>
+      </section>
+
+      <!-- Players ------------------------------------------------------>
+      <aside class="panel players-panel">
+        <div class="panel-head">
+          <div>
+            <h2>Players</h2>
+            <p class="panel-sub">Live tracking + motion</p>
+          </div>
+          <span id="player-count" class="state-chip">0 tracked</span>
+        </div>
+
+        <div id="player-list" class="player-list">
+          <p class="hint">No players yet. Start the camera or try demo players.</p>
+        </div>
+
+        <div class="hud-box">
+          <div class="hud-top">
+            <span id="hud-phase">IDLE</span>
+            <span id="hud-timer">--</span>
+          </div>
+          <div id="hud-message" class="hud-message">Waiting for the TV…</div>
+          <div id="hud-score" class="hud-score"></div>
+          <div id="tv-score" class="tv-score"></div>
+        </div>
+
+        <div class="tips">
+          <h3>Setup checklist</h3>
+          <ul>
+            <li>Connect the TV with HDMI and open <code>/display.html</code> on it.</li>
+            <li>Point the laptop camera at the players and the TV.</li>
+            <li>Dim the lights, then run <strong>Auto-calibrate TV</strong>.</li>
+            <li>Stand 2–4 m back so your whole body is in frame, then <strong>wave</strong> to join.</li>
+            <li>For the best perspective, stand at a measured distance and tap <strong>Calibrate FOV</strong>.</li>
+          </ul>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="host-footer">
+      <span>Everything stays on your local network.</span>
+      <span>TV display: <code id="display-url">/display.html</code></span>
+      <span>Phone tracker: <code>/tracker.html</code></span>
+    </footer>
+
+    <div id="toast" class="toast"></div>
+
+    <div id="fatal" class="fatal" hidden>
+      <div class="fatal-card">
+        <h2>Something went wrong</h2>
+        <p class="fatal-msg"></p>
+        <button class="btn primary" onclick="location.reload()">Reload the controller</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/app/host.js"></script>
+  </body>
+</html>

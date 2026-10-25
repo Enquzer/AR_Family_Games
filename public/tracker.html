@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#04060f" />
+    <title>AR Family Games · Extra Camera</title>
+    <link rel="stylesheet" href="/styles/main.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070b16'/%3E%3Cpath d='M12 44 24 18l8 15 8-15 12 26' stroke='%2322d3ee' stroke-width='5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body class="tracker-page">
+    <header class="tracker-top">
+      <div class="brand">
+        <span class="brand-mark">AR</span>
+        <span class="brand-text">
+          <strong>EXTRA CAMERA</strong>
+          <small>phone tracker</small>
+        </span>
+      </div>
+      <div class="net-pill">
+        <span id="net-dot" class="dot bad"></span>
+        <span id="net-label">CONNECTING</span>
+      </div>
+    </header>
+
+    <main class="tracker-main">
+      <div id="preview" class="tracker-preview">
+        <video id="video" playsinline muted autoplay></video>
+        <canvas id="overlay"></canvas>
+        <div id="preview-empty" class="preview-empty">
+          <div class="cam-icon">◎</div>
+          <strong>Camera off</strong>
+          <span>Start the camera, then wave at it to join the game.</span>
+        </div>
+        <div class="preview-badges">
+          <span id="fps-badge" class="badge">0 FPS</span>
+          <span id="pose-badge" class="badge">0 PLAYERS</span>
+        </div>
+      </div>
+
+      <div class="tracker-controls">
+        <label class="field">
+          <span>Room</span>
+          <input id="room-input" maxlength="8" value="HOME" spellcheck="false" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Camera</span>
+          <select id="camera-select">
+            <option value="">Default camera</option>
+          </select>
+        </label>
+        <button id="btn-camera" class="btn primary big" type="button">Start camera</button>
+      </div>
+
+      <div class="tracker-status">
+        <span id="tracker-status" class="cam-status">Camera off</span>
+        <span id="display-label" class="state-chip">NO TV</span>
+      </div>
+
+      <div id="player-list" class="player-list"></div>
+
+      <p class="hint warn tracker-note">
+        Phone cameras need a secure page. If the camera is blocked over your LAN address, use the
+        laptop host instead or serve the app over HTTPS.
+      </p>
+    </main>
+
+    <div id="toast" class="toast"></div>
+    <script type="module" src="/src/app/tracker.js"></script>
+  </body>
+</html>
