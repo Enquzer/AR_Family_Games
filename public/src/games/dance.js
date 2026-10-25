@@ -819,7 +819,6 @@ export class DanceGame extends BaseGame {
     const beatPulse = Math.sin(beatPhase * Math.PI * 2);
     const bounce = Math.abs(Math.sin(beatPhase * Math.PI)); // Vertical knee compression on beat
 
-    const p = this.coachPose;
     const style = move.style || 'groove';
 
     // 1. HIP & PELVIS KINEMATICS ENGINE
