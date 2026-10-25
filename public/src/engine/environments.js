@@ -809,7 +809,7 @@ export function buildBallingHall() {
 
   return {
     scene,
-    camera: { pos: [0, 7.4, 13.2], look: [0, 0.95, -0.9], fov: 44 },
+    camera: { pos: [0, 9.6, 15.2], look: [0, 0.9, -0.5], fov: 42 },
     table: { y: TABLE_Y, width: W, length: L, pockets },
     update(dt, t) {
       const pulse = 0.5 + Math.sin(t * 2.2) * 0.5;

@@ -362,7 +362,7 @@ function startGame(gameId, options = {}) {
 
   if (sim) {
     sim.setScenario(gameId);
-    const count = gameId === 'boxing' || gameId === 'tennis' ? 2 : 3;
+    const count = gameId === 'boxing' || gameId === 'tennis' || gameId === 'balling' ? 2 : 3;
     sim.setPlayerCount(count);
     syncDemoPlayers();
   }

@@ -254,6 +254,10 @@ export class BallingGame extends BaseGame {
       return;
     }
     this.activeIndex = next;
+    // Throw away pushes that happened while the previous shot was rolling or
+    // while the results card was up, otherwise a stale push can auto-fire as
+    // soon as the next turn becomes active.
+    for (const player of this.players) this.drain(player);
     this.#resetRack();
     this.phase = 'aim';
     this.aim = 0;
@@ -279,21 +283,32 @@ export class BallingGame extends BaseGame {
     if (!this.players.length) return;
     const active = this.players[this.activeIndex];
     const others = this.players.filter((p) => p !== active);
-    const sideXs = [-3.15, 3.15, -1.55, 1.55];
+    // Stand the players around the near end instead of directly behind the
+    // table. The near-side centre spot is hidden by the bottom HUD cards on a
+    // 16:9 TV, so the active shooter uses the near-left slot and the others
+    // take the near-right / far-side slots.
+    const slots = [
+      { x: -2.0, z: 5.75 },
+      { x: 2.0, z: 5.75 },
+      { x: -3.55, z: 1.4 },
+      { x: 3.55, z: 1.4 },
+    ];
     others.forEach((p, i) => {
-      this.place(p, sideXs[i % sideXs.length], 5.35, { y: 0, facing: 0 });
+      const slot = slots[(i + 1) % slots.length];
+      this.place(p, slot.x, slot.z, { y: 0, facing: 0 });
       p.avatar.setVisible(true);
       p.avatar.setProp('none');
       p.avatar.seated = false;
       p.avatar.followStage = false;
     });
     if (active) {
-      this.place(active, 0, 6.55, { y: 0, facing: 0 });
+      const slot = slots[0];
+      this.place(active, slot.x, slot.z, { y: 0, facing: 0 });
       active.avatar.setVisible(true);
       active.avatar.seated = false;
       active.avatar.followStage = false;
       active.avatar.setProp(this.phase === 'aim' ? 'ball' : 'none');
-      this.activeRing.position.set(0, 0.025, 6.55);
+      this.activeRing.position.set(slot.x, 0.025, slot.z);
       this.activeRing.visible = true;
     }
   }
@@ -302,6 +317,12 @@ export class BallingGame extends BaseGame {
     this.time += dt;
     this.env.update?.(dt, this.time);
     this.turnTime += dt;
+
+    // Only an aim-phase push should launch. Drain and ignore events while the
+    // balls are rolling or the results screen is visible.
+    if (this.phase !== 'aim') {
+      for (const player of this.players) this.drain(player);
+    }
 
     if (this.phase === 'waiting') {
       if (this.players.length) this.start();
@@ -390,9 +411,12 @@ export class BallingGame extends BaseGame {
     if (this.phase !== 'aim') return;
     const p = this.#activePlayer();
     if (!p) return;
-    const power = clampNum(ev.power, 0.25, 1.35, this.power);
-    const aim = clampNum(ev.aim, -0.8, 0.8, this.aim);
-    const curve = clampNum(ev.curve, -1, 1, this.curve);
+    const power = clampNum(ev.power, 0.25, 1.0, this.power);
+    // Use the same smoothed aim/curve shown by the on-table guide. The raw
+    // push snapshot can be a few frames ahead of the visible aim line, which
+    // made demo shots veer into a side pocket even though the guide looked safe.
+    const aim = clampNum(this.aim, -0.8, 0.8, 0);
+    const curve = clampNum(this.curve, -1, 1, 0);
     const speed = 7 + power * 11;
     this.cueBall.vel.set(Math.sin(aim) * speed, 0, -Math.cos(aim) * speed);
     this.cueBall.spin = curve;
@@ -408,7 +432,7 @@ export class BallingGame extends BaseGame {
     this.lastPushAt = this.time;
     p.avatar.setProp('none');
     this.message = 'BREAK!';
-    this.messageSub = `${Math.round(power * 100)}% power · ${
+    this.messageSub = `${Math.min(100, Math.round(power * 100))}% power · ${
       curve < -0.12 ? 'LEFT CURVE' : curve > 0.12 ? 'RIGHT CURVE' : 'STRAIGHT'
     }`;
     this.ctx.audio.play('cue');
@@ -568,6 +592,7 @@ export class BallingGame extends BaseGame {
     if (b.cue) {
       this.scratch = true;
       this.cueRespawnAt = this.time + 0.8;
+      this.shotPoints -= 25;
       if (p) this.scores.set(p.key, (this.scores.get(p.key) || 0) - 25);
       this.message = 'SCRATCH! -25';
       this.messageSub = 'The white ball comes back';
@@ -627,9 +652,10 @@ export class BallingGame extends BaseGame {
         this.scores.set(p.key, (this.scores.get(p.key) || 0) + bonus);
       }
       this.message = 'SHOT COMPLETE';
-      this.messageSub = `${this.shotHits} hits · ${this.shotPockets} pockets · +${this.shotPoints} pts${
-        bonus ? ` (+${bonus} bonus)` : ''
-      }`;
+      const netLabel = this.shotPoints >= 0 ? `+${this.shotPoints}` : `${this.shotPoints}`;
+      this.messageSub = `${this.shotHits} hit${this.shotHits === 1 ? '' : 's'} · ${this.shotPockets} pocket${
+        this.shotPockets === 1 ? '' : 's'
+      } · ${netLabel} pts${this.scratch ? ' · SCRATCH' : ''}${bonus ? ` (+${bonus} bonus)` : ''}`;
       this.ctx.audio.play('bell');
     }
     this.#updateAimVisuals();
@@ -708,6 +734,7 @@ export class BallingGame extends BaseGame {
       .map((p) => {
         const score = this.scores.get(p.key) || 0;
         const left = this.#shotsLeft(p);
+        const aiming = p === active && (this.phase === 'aim' || this.phase === 'rolling');
         return {
           id: p.key,
           name: p.name,
@@ -716,8 +743,8 @@ export class BallingGame extends BaseGame {
           max: 0,
           label: '',
           points: score,
-          detail: `${left} shot${left === 1 ? '' : 's'} left${p === active ? ' · AIMING' : ''}`,
-          active: true,
+          detail: `${left} shot${left === 1 ? '' : 's'} left${aiming ? ' · AIMING' : ''}`,
+          active: p === active,
         };
       })
       .sort((a, b) => b.points - a.points)
@@ -726,11 +753,14 @@ export class BallingGame extends BaseGame {
     const activeScore = active ? this.scores.get(active.key) || 0 : 0;
     const left = active ? this.#shotsLeft(active) : 0;
     const curveLabel = this.curve < -0.12 ? 'LEFT' : this.curve > 0.12 ? 'RIGHT' : 'STRAIGHT';
-    const scoreLine = active
-      ? `SCORE ${activeScore} · ${left} SHOT${left === 1 ? '' : 'S'} LEFT · AIM ${Math.round(
-          (this.aim * 180) / Math.PI
-        )}° · ${curveLabel}`
-      : '';
+    const aimPart =
+      this.phase === 'aim' || this.phase === 'rolling'
+        ? ` · ${Math.round((this.aim * 180) / Math.PI)}° ${curveLabel}`
+        : '';
+    const scoreLine =
+      active && this.phase !== 'matchEnd'
+        ? `SCORE ${activeScore} · ${left} SHOT${left === 1 ? '' : 'S'}${aimPart}`
+        : '';
 
     const queue = this.players
       .filter((p) => p !== active && this.#shotsLeft(p) > 0)
@@ -744,10 +774,7 @@ export class BallingGame extends BaseGame {
       score: scoreLine,
       message: this.message,
       messageSub: this.messageSub,
-      big:
-        this.phase === 'aim' && this.turnTime < 1.35 && active
-          ? { text: active.name, sub: 'AIM & PUSH' }
-          : null,
+      big: null,
       players: list,
       results: this.phase === 'matchEnd' ? this.results : [],
       queue,

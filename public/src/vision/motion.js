@@ -250,9 +250,13 @@ export class MotionTracker {
     s.elbowL = angleAt(wrL, elL, shL);
     s.elbowR = angleAt(wrR, elR, shR);
     s.shoulderTilt = clamp((shR.y - shL.y) / (shoulderW * 0.8), -1, 1);
-    const shSpan = (shR.x - shL.x) / shoulderW;
-    const hipSpan = (hipR.x - hipL.x) / shoulderW;
-    s.torsoTwist = clamp((shSpan - hipSpan) * 1.8, -1, 1);
+    // Torso twist is the angle between the 3D shoulder line and the 3D hip
+    // line. Comparing only their 2D widths made a normal shoulder/hip width
+    // difference look like a permanent twist, which added phantom power and
+    // made cue-ball shots curve even when the player was square to the TV.
+    const shAngle = Math.atan2(shR.z - shL.z, shR.x - shL.x);
+    const hipAngle = Math.atan2(hipR.z - hipL.z, hipR.x - hipL.x);
+    s.torsoTwist = clamp((shAngle - hipAngle) * 1.2, -1, 1);
     s.confidence = vis;
     s.lastSeen = now;
 
@@ -390,15 +394,15 @@ export class MotionTracker {
     const pushForward = Math.max(forwardSpeedL, forwardSpeedR);
     const pushSpeed = Math.max(handSpeedL, handSpeedR);
     const pushHandsX = (wrL.x + wrR.x) * 0.5;
-    const handsNear = Math.abs(wrL.x - wrR.x) < shoulderW * 1.65;
+    const handsNear = Math.abs(wrL.x - wrR.x) < shoulderW * 2.0;
     if (
       now >= this.waveLockUntil &&
       !waveCandidate &&
       s.block < 0.6 &&
       now - this.lastPushAt > 520 &&
       handsNear &&
-      pushForward > 0.9 &&
-      pushSpeed > 1.25
+      pushForward > 1.0 &&
+      pushSpeed > 0.45
     ) {
       this.lastPushAt = now;
       const quality = clamp((pushForward * 0.55 + pushSpeed * 0.18 - 0.55) / 2.6, 0, 1);

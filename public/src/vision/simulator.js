@@ -363,17 +363,19 @@ export class PoseSimulator {
     const bob = Math.sin(t * 3.1) * 0.006;
 
     for (const k of [0, 11, 12, 23, 24, 25, 26, 27, 28]) shift(lm, k, sway * 0.012, bob);
-    shift(lm, 11, sway * 0.03, 0, sway * 0.035);
-    shift(lm, 12, sway * 0.03, 0, -sway * 0.035);
-    shift(lm, 23, sway * 0.018, 0, -sway * 0.02);
-    shift(lm, 24, sway * 0.018, 0, sway * 0.02);
+    shift(lm, 11, sway * 0.012, 0, 0);
+    shift(lm, 12, sway * 0.012, 0, 0);
+    shift(lm, 23, sway * 0.008, 0, 0);
+    shift(lm, 24, sway * 0.008, 0, 0);
     shift(lm, 0, sway * 0.02, 0, 0);
 
     // Both hands are held in front at chest height and pushed toward the TV.
-    shift(lm, 15, sway * 0.09 - 0.015, -0.11 - push * 0.03, -0.12 - push * 0.24);
-    shift(lm, 16, sway * 0.09 + 0.015, -0.11 - push * 0.03, -0.12 - push * 0.24);
-    shift(lm, 13, sway * 0.05 - 0.01, -0.05 - push * 0.01, -0.05 - push * 0.1);
-    shift(lm, 14, sway * 0.05 + 0.01, -0.05 - push * 0.01, -0.05 - push * 0.1);
+    // Keep the swivel moderate: the aim is scaled from shoulder-width units,
+    // so a small hand shift already produces a readable left/right angle.
+    shift(lm, 15, sway * 0.012 + 0.02, -0.11 - push * 0.02, -0.1 - push * 0.12);
+    shift(lm, 16, sway * 0.012 - 0.02, -0.11 - push * 0.02, -0.1 - push * 0.12);
+    shift(lm, 13, sway * 0.008 + 0.012, -0.05 - push * 0.01, -0.05 - push * 0.06);
+    shift(lm, 14, sway * 0.008 - 0.012, -0.05 - push * 0.01, -0.05 - push * 0.06);
 
     const lift = Math.max(0, Math.sin(t * 1.7)) * 0.035;
     shift(lm, 27, -0.008, -lift, -lift * 0.3);

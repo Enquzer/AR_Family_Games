@@ -24,6 +24,7 @@ laptop camera ──► pose tracking ──► WebSocket ──► TV display
 | **Rowing** | 1–4 | Pull both arms back together in a rowing rhythm. Lean to steer across the lake. |
 | **Coaster** | 1–4 | A cooperative roller-coaster ride. Lean to steer, raise both arms to boost, crouch under bars. |
 | **Dance** | 1–4 | Follow the coach’s arms, lean and knee lifts on the beat. Match the pose, keep your energy up and build combos. |
+| **Balling** | 1–4 | Hold both hands out, swivel to aim and push forward to break the rack. Power and curve change every shot. |
 
 The TV owns the authoritative simulation and renders the 3D world. The laptop
 sends compact pose packets at about 20 Hz and mirrors the live scoreboard.
@@ -171,6 +172,9 @@ the default 55° estimate still works, just with less accurate depth.
 - **Boxing / Tennis** use the first one or two players. Extra players stay on
   the bench.
 - **Sprint / Hurdles / Rowing / Coaster** support up to four players.
+- **Balling** is turn-based for up to four players. The active shooter stands in
+  the near-left slot; hold both hands out, swivel to aim, then push forward to
+  shoot. Each player gets three shots and the rack resets after every shot.
 - **Back to menu** stops the current game and returns the TV to the attract
   screen.
 - **Restart game** starts a fresh round of the selected game.
@@ -186,12 +190,18 @@ the default 55° estimate still works, just with less accurate depth.
   all count. Standing still cannot score; movement and energy matter. Grades are
   `PERFECT`, `GREAT`, `GOOD` and `MISS`, with combo multipliers and per-player
   groove accuracy.
+- **Balling** is a turn-based 10-ball rack. The aim guide follows your smoothed
+  hand swivel, a forward push launches the cue ball, and torso/wrist twist adds
+  curve. Each ball hit scores 15 + impact + chain bonus, each pocket scores 80,
+  and scratching the cue ball costs 25. Three shots per player; the rack resets
+  after every shot so everyone gets the same break.
 - **Sprint, hurdles and rowing** use fused body kinematics. Sprint and hurdles
   read leg drive, arm drive, knee lift and hip bob, so running on the spot drives
   the avatar’s legs and arms instead of only sliding it forward.
 - **Audio** is synthesised locally with WebAudio: punch impacts, whiffs, blocks,
-  footsteps, rowing splashes, dance beats, claps, bass and grade feedback. Click
-  the TV page once (or press the sound button) to unlock browser audio.
+  footsteps, rowing splashes, pool cue/ball/pocket hits, dance beats, claps, bass
+  and grade feedback. Click the TV page once (or press the sound button) to
+  unlock browser audio.
 - **Avatar orientation** follows the 3D shoulder and hip lines, so a player who
   turns their body turns their avatar instead of always facing the TV.
 
@@ -204,7 +214,7 @@ without standing up.
 - Laptop: `http://localhost:3000/?demo=1`
 
 Valid game IDs: `boxing`, `tennis`, `sprint`, `hurdles`, `boat`, `coaster`,
-`dance`.
+`dance`, `balling`.
 On the TV, `?demo=1` alone shows the attract screen with simulated players. The
 laptop's **Demo players** button does the same thing interactively.
 
@@ -326,7 +336,7 @@ AR_Family_Games/
 │  └─ src/
 │     ├─ app/                   host, display, tracker, pose engine
 │     ├─ engine/                renderer, avatars, worlds, effects, audio
-│     ├─ games/                 boxing, tennis, track, boat, coaster, dance
+│     ├─ games/                 boxing, tennis, track, boat, coaster, dance, balling
 │     ├─ vision/                camera, pose tracker, motion, calibration, simulator
 │     ├─ shared/                math, pose format, homography, stage mapping
 │     └─ net/                   reconnecting WebSocket client
@@ -338,9 +348,10 @@ AR_Family_Games/
 1. **Host** captures camera frames and runs MediaPipe Pose Landmarker locally in
    the browser. A multi-person tracker keeps stable IDs and colors.
 2. **Motion features** are derived from the landmarks: punches, swings, blocks,
-   lean, running cadence, jumps, crouches, arm raises, rowing strokes and the
-   wave-to-join gesture. A raised-hand side-to-side wave is filtered out of the
-   punch/swing features so joining never throws accidental hits.
+   lean, running cadence, jumps, crouches, arm raises, rowing strokes, two-hand
+   pushes and the wave-to-join gesture. A raised-hand side-to-side wave is
+   filtered out of the punch/swing features so joining never throws accidental
+   hits.
 3. **Pose packets** (33 landmarks per player, compact arrays, plus a `joined`
    flag) go to the local Node server over WebSocket and are relayed to the
    display.
