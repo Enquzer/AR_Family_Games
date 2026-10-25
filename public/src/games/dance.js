@@ -333,12 +333,30 @@ export class DanceGame extends BaseGame {
     this.subtitle = 'Rhythm Club · Follow the Coach';
     this.phase = 'waiting';
 
-    this.moves = DANCE_ROUTINE.map(m => {
+    let customMoves = [];
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem('ar_custom_dance_moves');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) {
+            customMoves = parsed.map(m => {
+              m.useBakedFrames = true;
+              return m;
+            });
+          }
+        }
+      }
+    } catch {}
+
+    const defaultMoves = DANCE_ROUTINE.map(m => {
       if (!m.frames) {
         m.frames = generateReferenceLandmarkFrames(m, 30);
       }
       return m;
     });
+
+    this.moves = [...customMoves, ...defaultMoves];
     this.moveIndex = 0;
     this.currentMove = this.moves[0];
     this.prevMove = null;
