@@ -11,10 +11,10 @@
       color: #e2e8f0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       margin: 0;
-      padding: 1.5rem;
+      padding: 1.25rem;
       display: flex;
       flex-direction: column;
-      gap: 1.25rem;
+      gap: 1rem;
       min-height: 100vh;
       box-sizing: border-box;
     }
@@ -22,12 +22,12 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding-bottom: 1rem;
+      padding-bottom: 0.75rem;
       border-bottom: 1px solid #1e293b;
     }
     .header h1 {
       margin: 0;
-      font-size: 1.5rem;
+      font-size: 1.4rem;
       display: flex;
       align-items: center;
       gap: 0.75rem;
@@ -47,6 +47,11 @@
       gap: 1.25rem;
       flex: 1;
     }
+    @media (max-width: 1200px) {
+      .layout-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
     .viewport-card {
       background: #111827;
       border-radius: 0.75rem;
@@ -57,10 +62,10 @@
       position: relative;
     }
     .viewport-title {
-      padding: 0.75rem 1rem;
+      padding: 0.65rem 1rem;
       background: #1a2234;
       font-weight: 600;
-      font-size: 0.9rem;
+      font-size: 0.85rem;
       color: #cbd5e1;
       display: flex;
       justify-content: space-between;
@@ -68,13 +73,26 @@
     }
     .viewport-content {
       flex: 1;
-      min-height: 440px;
+      min-height: 480px;
       position: relative;
     }
     canvas {
       width: 100% !important;
       height: 100% !important;
       display: block;
+    }
+    .viewport-overlay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(4px);
+      padding: 0.35rem 0.65rem;
+      border-radius: 0.375rem;
+      border: 1px solid #334155;
+      font-size: 0.75rem;
+      color: #94a3b8;
+      pointer-events: none;
     }
     .panel-card {
       background: #111827;
@@ -83,22 +101,22 @@
       padding: 1.25rem;
       display: flex;
       flex-direction: column;
-      gap: 1rem;
+      gap: 0.85rem;
       overflow-y: auto;
-      max-height: calc(100vh - 120px);
+      max-height: calc(100vh - 100px);
     }
     .section-title {
-      font-size: 0.85rem;
+      font-size: 0.8rem;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.05em;
       color: #38bdf8;
-      margin-bottom: 0.25rem;
+      margin-bottom: 0.15rem;
     }
     .form-group {
       display: flex;
       flex-direction: column;
-      gap: 0.35rem;
+      gap: 0.3rem;
     }
     label {
       font-size: 0.8rem;
@@ -108,7 +126,7 @@
       background: #1e293b;
       border: 1px solid #334155;
       color: #f1f5f9;
-      padding: 0.5rem 0.65rem;
+      padding: 0.45rem 0.6rem;
       border-radius: 0.375rem;
       font-size: 0.85rem;
     }
@@ -126,15 +144,15 @@
       color: #fff;
       border: none;
       border-radius: 0.375rem;
-      padding: 0.6rem 1rem;
+      padding: 0.55rem 0.9rem;
       font-weight: 600;
       font-size: 0.85rem;
       cursor: pointer;
       transition: background 0.15s;
-      display: flex;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 0.5rem;
+      gap: 0.4rem;
     }
     .btn:hover { background: #1d4ed8; }
     .btn-secondary {
@@ -149,7 +167,7 @@
     .metrics-box {
       background: #1e293b;
       border-radius: 0.5rem;
-      padding: 0.75rem;
+      padding: 0.65rem;
       font-family: monospace;
       font-size: 0.75rem;
       line-height: 1.5;
@@ -159,7 +177,7 @@
       display: flex;
       align-items: center;
       gap: 0.75rem;
-      padding: 0.75rem 1rem;
+      padding: 0.65rem 1rem;
       background: #1a2234;
       border-top: 1px solid #1f2937;
     }
@@ -171,7 +189,7 @@
       <span>💃 Dance Mocap Baker</span>
       <span class="badge">Mixamo FBX → MediaPipe 33-Landmarks</span>
     </h1>
-    <div style="display: flex; gap: 0.75rem;">
+    <div style="display: flex; gap: 0.65rem;">
       <a href="/index.html" class="btn btn-secondary" style="text-decoration: none;">🎮 Back to Game</a>
       <button id="btnLoadDefault" class="btn btn-secondary">⚡ Load Excited.fbx</button>
       <label class="btn" style="cursor: pointer;">
@@ -186,13 +204,15 @@
     <div class="viewport-card">
       <div class="viewport-title">
         <span>3D Humanoid Mocap Viewport</span>
-        <span id="txtModelStats" class="badge">No model loaded</span>
+        <span id="txtModelStats" class="badge">Loading Excited.fbx...</span>
       </div>
-      <div class="viewport-content" id="viewport3D"></div>
+      <div class="viewport-content" id="viewport3D">
+        <div class="viewport-overlay">Left drag: Orbit 360° · Scroll: Zoom</div>
+      </div>
       <div class="timeline-bar">
-        <button id="btnPlayPause" class="btn btn-secondary" style="padding: 0.4rem 0.8rem;">⏸ Pause</button>
+        <button id="btnPlayPause" class="btn btn-secondary" style="padding: 0.35rem 0.75rem;">⏸ Pause</button>
         <input type="range" id="sliderTimeline" min="0" max="1" step="0.001" value="0" style="flex: 1;">
-        <span id="txtTime" style="font-size: 0.8rem; font-family: monospace; min-width: 60px;">0.00s</span>
+        <span id="txtTime" style="font-size: 0.8rem; font-family: monospace; min-width: 55px;">0.00s</span>
       </div>
     </div>
 
@@ -206,7 +226,7 @@
         <canvas id="canvasLandmarks"></canvas>
       </div>
       <div class="timeline-bar" style="justify-content: space-between;">
-        <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+        <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.85rem;">
           <input type="checkbox" id="chkMirror"> Auto-Mirror (Left ↔ Right)
         </label>
         <span id="txtFrameStats" style="font-size: 0.75rem; color: #94a3b8;">Frame: 0 / 0</span>
@@ -249,7 +269,7 @@
         <input type="text" id="inpTip" value="Roll your hips and bounce on beat!">
       </div>
 
-      <div class="section-title" style="margin-top: 0.5rem;">Tempo & Resampling</div>
+      <div class="section-title" style="margin-top: 0.4rem;">Tempo & Resampling</div>
       <div class="row">
         <div class="form-group">
           <label>Clip BPM</label>
@@ -269,13 +289,13 @@
         </select>
       </div>
 
-      <div class="section-title" style="margin-top: 0.5rem;">Pose Normalization</div>
+      <div class="section-title" style="margin-top: 0.4rem;">Pose Normalization</div>
       <div class="form-group">
         <label>Shoulder Scale K: <span id="txtScaleK">0.18</span></label>
         <input type="range" id="sliderScaleK" min="0.10" max="0.30" step="0.01" value="0.18">
       </div>
 
-      <div class="section-title" style="margin-top: 0.5rem;">Live Extracted Features</div>
+      <div class="section-title" style="margin-top: 0.4rem;">Live Extracted Features</div>
       <div class="metrics-box" id="metricsBox">
         Hands: L [0, 0] | R [0, 0]<br>
         Lean: 0.00 | Twist: 0.00<br>
@@ -293,54 +313,109 @@
   <script type="module">
     import * as THREE from '/vendor/three/three.module.js';
     import { FBXLoader } from '/vendor/three/FBXLoader.js';
-    import { convertSkeletonToLandmarks, extractDanceFeatures, mirrorLandmarks, retimeMocapSequence } from '/src/shared/mocapConverter.js';
+    import {
+      convertSkeletonToLandmarks,
+      extractDanceFeatures,
+      mirrorLandmarks,
+      retimeMocapSequence,
+    } from '/src/shared/mocapConverter.js';
 
-    // Three.js 3D Viewport Setup
+    // 1. Three.js 3D Viewport Setup
     const container3D = document.getElementById('viewport3D');
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0f172a);
+    scene.background = new THREE.Color(0x0a0f1d);
 
-    const camera = new THREE.PerspectiveCamera(45, container3D.clientWidth / container3D.clientHeight, 0.1, 100);
-    camera.position.set(0, 1.3, 3.2);
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 50);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(container3D.clientWidth, container3D.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     container3D.appendChild(renderer.domElement);
 
-    // Grid & Lighting
-    const grid = new THREE.GridHelper(6, 12, 0x38bdf8, 0x1e293b);
+    // Orbit Camera Parameters
+    const cameraTarget = new THREE.Vector3(0, 0.95, 0);
+    const spherical = { radius: 2.8, theta: 0, phi: Math.PI / 2 - 0.05 };
+
+    function updateCameraPos() {
+      camera.position.x = cameraTarget.x + spherical.radius * Math.sin(spherical.phi) * Math.sin(spherical.theta);
+      camera.position.y = cameraTarget.y + spherical.radius * Math.cos(spherical.phi);
+      camera.position.z = cameraTarget.z + spherical.radius * Math.sin(spherical.phi) * Math.cos(spherical.theta);
+      camera.lookAt(cameraTarget);
+    }
+    updateCameraPos();
+
+    // Mouse / Touch Orbit Controls
+    let isDragging = false;
+    let prevMouseX = 0;
+    let prevMouseY = 0;
+
+    container3D.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      prevMouseX = e.clientX;
+      prevMouseY = e.clientY;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const dx = e.clientX - prevMouseX;
+      const dy = e.clientY - prevMouseY;
+      prevMouseX = e.clientX;
+      prevMouseY = e.clientY;
+
+      spherical.theta -= dx * 0.007;
+      spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi - dy * 0.007));
+      updateCameraPos();
+    });
+
+    window.addEventListener('mouseup', () => { isDragging = false; });
+
+    container3D.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      spherical.radius = Math.max(0.8, Math.min(7.0, spherical.radius + e.deltaY * 0.003));
+      updateCameraPos();
+    }, { passive: false });
+
+    // Grid Floor & Lighting
+    const grid = new THREE.GridHelper(5, 10, 0x38bdf8, 0x1e293b);
     grid.position.y = 0;
     scene.add(grid);
 
-    const ambLight = new THREE.AmbientLight(0xffffff, 1.2);
-    scene.add(ambLight);
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x1e293b, 1.2);
+    scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.8);
-    dirLight.position.set(3, 8, 5);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.6);
+    dirLight.position.set(3, 6, 4);
+    dirLight.castShadow = true;
     scene.add(dirLight);
 
-    // 2D MediaPipe Canvas Setup
+    const backLight = new THREE.DirectionalLight(0x38bdf8, 0.8);
+    backLight.position.set(-3, 3, -4);
+    scene.add(backLight);
+
+    // 2. 2D MediaPipe Canvas Setup
     const canvasLM = document.getElementById('canvasLandmarks');
     const ctx2D = canvasLM.getContext('2d');
 
     function resizeCanvases() {
-      const w3D = container3D.clientWidth;
-      const h3D = container3D.clientHeight;
+      const w3D = container3D.clientWidth || 400;
+      const h3D = container3D.clientHeight || 480;
       camera.aspect = w3D / h3D;
       camera.updateProjectionMatrix();
       renderer.setSize(w3D, h3D);
 
       const parentLM = canvasLM.parentElement;
-      canvasLM.width = parentLM.clientWidth * window.devicePixelRatio;
-      canvasLM.height = parentLM.clientHeight * window.devicePixelRatio;
+      const wLM = parentLM.clientWidth || 400;
+      const hLM = parentLM.clientHeight || 480;
+      canvasLM.width = wLM * window.devicePixelRatio;
+      canvasLM.height = hLM * window.devicePixelRatio;
     }
     window.addEventListener('resize', resizeCanvases);
-    setTimeout(resizeCanvases, 100);
+    new ResizeObserver(resizeCanvases).observe(container3D);
+    setTimeout(resizeCanvases, 50);
 
     // State
     let currentModel = null;
+    let skeletonHelper = null;
     let mixer = null;
     let action = null;
     let isPlaying = true;
@@ -350,54 +425,109 @@
 
     const fbxLoader = new FBXLoader();
 
-    async function loadFBX(urlOrBlob) {
-      document.getElementById('txtModelStats').textContent = 'Loading FBX...';
-      try {
-        const fbx = await new Promise((resolve, reject) => {
-          fbxLoader.load(urlOrBlob, resolve, undefined, reject);
-        });
+    function setupLoadedFBX(fbx, name = '') {
+      if (currentModel) {
+        scene.remove(currentModel);
+        if (skeletonHelper) scene.remove(skeletonHelper);
+      }
 
-        if (currentModel) scene.remove(currentModel);
-        currentModel = fbx;
-        scene.add(currentModel);
+      currentModel = fbx;
+      scene.add(currentModel);
 
-        currentModel.position.set(0, 0, 0);
+      // Force compute initial world transforms
+      currentModel.updateMatrixWorld(true);
 
-        if (fbx.animations && fbx.animations.length > 0) {
-          mixer = new THREE.AnimationMixer(currentModel);
-          const clip = fbx.animations[0];
-          action = mixer.clipAction(clip);
-          action.play();
-          clipDuration = clip.duration;
-          currentTime = 0;
-          document.getElementById('txtModelStats').textContent = `${clipDuration.toFixed(2)}s · ${Math.round(clipDuration * 30)} frames`;
-        } else {
-          mixer = null;
-          action = null;
-          clipDuration = 2.0;
-          document.getElementById('txtModelStats').textContent = 'Static Model (No Animation)';
+      // Normalize scale: Mixamo models are in cm (approx 175-180 tall)
+      const box = new THREE.Box3().setFromObject(currentModel);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+
+      let scale = 1.0;
+      if (size.y > 0) {
+        scale = 1.80 / size.y;
+        currentModel.scale.setScalar(scale);
+      }
+
+      // Ground feet flush onto floor Y = 0
+      currentModel.updateMatrixWorld(true);
+      const boxScaled = new THREE.Box3().setFromObject(currentModel);
+      currentModel.position.y = -boxScaled.min.y;
+      currentModel.position.x = 0;
+      currentModel.position.z = 0;
+      currentModel.updateMatrixWorld(true);
+
+      // Ensure all meshes have clean, visible materials
+      currentModel.traverse((child) => {
+        if (child.isMesh || child.isSkinnedMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+          if (child.material) {
+            const mats = Array.isArray(child.material) ? child.material : [child.material];
+            mats.forEach((m) => {
+              m.side = THREE.DoubleSide;
+              m.roughness = 0.55;
+            });
+          }
         }
-      } catch (err) {
-        console.error('FBX Load error:', err);
-        document.getElementById('txtModelStats').textContent = 'Error loading FBX';
+      });
+
+      // Visual Skeleton Helper
+      skeletonHelper = new THREE.SkeletonHelper(currentModel);
+      skeletonHelper.material.linewidth = 2;
+      scene.add(skeletonHelper);
+
+      // Setup Animation Clip & Mixer
+      if (fbx.animations && fbx.animations.length > 0) {
+        mixer = new THREE.AnimationMixer(currentModel);
+        const clip = fbx.animations[0];
+        action = mixer.clipAction(clip);
+        action.play();
+        clipDuration = clip.duration;
+        currentTime = 0;
+        document.getElementById('txtModelStats').textContent = `${name || 'FBX'} · ${clipDuration.toFixed(2)}s (${Math.round(clipDuration * 30)} frames)`;
+      } else {
+        mixer = null;
+        action = null;
+        clipDuration = 2.0;
+        document.getElementById('txtModelStats').textContent = `${name || 'FBX'} · Static Rig (No Animation)`;
       }
     }
 
-    // Default load Excited.fbx
-    loadFBX('/models/Excited.fbx');
+    // Load default model Excited.fbx
+    async function loadDefaultModel() {
+      document.getElementById('txtModelStats').textContent = 'Loading Excited.fbx...';
+      try {
+        const res = await fetch('/models/Excited.fbx');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const buffer = await res.arrayBuffer();
+        const fbx = fbxLoader.parse(buffer, '/models/');
+        setupLoadedFBX(fbx, 'Excited.fbx');
+      } catch (err) {
+        console.error('FBX parse error:', err);
+        document.getElementById('txtModelStats').textContent = `Load Error: ${err.message}`;
+      }
+    }
 
-    document.getElementById('btnLoadDefault').addEventListener('click', () => {
-      loadFBX('/models/Excited.fbx');
-    });
+    loadDefaultModel();
 
-    document.getElementById('fileInput').addEventListener('change', (e) => {
+    document.getElementById('btnLoadDefault').addEventListener('click', loadDefaultModel);
+
+    // Custom FBX File Input
+    document.getElementById('fileInput').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      const url = URL.createObjectURL(file);
-      loadFBX(url);
+      document.getElementById('txtModelStats').textContent = `Reading ${file.name}...`;
+      try {
+        const buffer = await file.arrayBuffer();
+        const fbx = fbxLoader.parse(buffer, '');
+        setupLoadedFBX(fbx, file.name);
+      } catch (err) {
+        console.error('Custom FBX load error:', err);
+        document.getElementById('txtModelStats').textContent = `Error: ${err.message}`;
+      }
     });
 
-    // Playback controls
+    // Playback Controls
     const btnPlayPause = document.getElementById('btnPlayPause');
     const sliderTimeline = document.getElementById('sliderTimeline');
     const txtTime = document.getElementById('txtTime');
@@ -433,13 +563,15 @@
     function drawLandmarks(landmarks) {
       const w = canvasLM.width;
       const h = canvasLM.height;
+      if (!w || !h) return;
+
       ctx2D.clearRect(0, 0, w, h);
 
-      // Background card
-      ctx2D.fillStyle = '#0f172a';
+      // Background
+      ctx2D.fillStyle = '#0a0f1d';
       ctx2D.fillRect(0, 0, w, h);
 
-      // Grid guides
+      // Crosshairs & Floor Guides
       ctx2D.strokeStyle = '#1e293b';
       ctx2D.lineWidth = 1;
       ctx2D.beginPath();
@@ -447,8 +579,8 @@
       ctx2D.moveTo(0, h * 0.55); ctx2D.lineTo(w, h * 0.55);
       ctx2D.stroke();
 
-      // Connective bones
-      ctx2D.lineWidth = 3 * window.devicePixelRatio;
+      // Bones
+      ctx2D.lineWidth = 3.5 * window.devicePixelRatio;
       ctx2D.strokeStyle = '#38bdf8';
       for (const [a, b] of POSE_CONNECTIONS) {
         const pA = landmarks[a];
@@ -461,7 +593,7 @@
         ctx2D.stroke();
       }
 
-      // Joint nodes
+      // Joint Nodes
       for (let i = 0; i < landmarks.length; i++) {
         const p = landmarks[i];
         if (!p || p[3] <= 0) continue;
@@ -478,7 +610,7 @@
       }
     }
 
-    // Animation Loop
+    // Main Animation Loop
     function animate() {
       requestAnimationFrame(animate);
       const now = performance.now();
@@ -498,22 +630,30 @@
         const targetScaleK = parseFloat(sliderScaleK.value);
         const mirror = chkMirror.checked;
 
-        const lm = convertSkeletonToLandmarks(currentModel, {
-          targetShoulderWidth: targetScaleK,
-          centerX: 0.5,
-          centerY: 0.55,
-          mirror: mirror,
-        });
+        try {
+          const lm = convertSkeletonToLandmarks(currentModel, {
+            targetShoulderWidth: targetScaleK,
+            centerX: 0.5,
+            centerY: 0.55,
+            mirror: mirror,
+          });
 
-        drawLandmarks(lm);
+          drawLandmarks(lm);
 
-        const feats = extractDanceFeatures(lm);
-        document.getElementById('metricsBox').innerHTML = `
-          Hands: L [${feats.handL.x.toFixed(2)}, ${feats.handL.y.toFixed(2)}] | R [${feats.handR.x.toFixed(2)}, ${feats.handR.y.toFixed(2)}]<br>
-          Lean: ${feats.lean.toFixed(2)} | Twist: ${feats.torsoTwist.toFixed(2)}<br>
-          Knees: L ${feats.kneeL.toFixed(2)} | R ${feats.kneeR.toFixed(2)}<br>
-          Hip Amp: ${feats.hipAmp.toFixed(2)}
-        `;
+          const feats = extractDanceFeatures(lm);
+          document.getElementById('metricsBox').innerHTML = `
+            Hands: L [${feats.handL.x.toFixed(2)}, ${feats.handL.y.toFixed(2)}] | R [${feats.handR.x.toFixed(2)}, ${feats.handR.y.toFixed(2)}]<br>
+            Lean: ${feats.lean.toFixed(2)} | Twist: ${feats.torsoTwist.toFixed(2)}<br>
+            Knees: L ${feats.kneeL.toFixed(2)} | R ${feats.kneeR.toFixed(2)}<br>
+            Hip Amp: ${feats.hipAmp.toFixed(2)}
+          `;
+
+          const curFrame = Math.round(currentTime * 30);
+          const totalFrames = Math.round(clipDuration * 30);
+          document.getElementById('txtFrameStats').textContent = `Frame: ${curFrame} / ${totalFrames}`;
+        } catch (err) {
+          console.error('Frame conversion error:', err);
+        }
       }
 
       renderer.render(scene, camera);
@@ -538,7 +678,6 @@
       const sampleFps = 30;
       const rawFrames = [];
 
-      // Sample original animation at 30 FPS
       for (let t = 0; t <= clampedDuration; t += 1 / sampleFps) {
         mixer.setTime(t);
         currentModel.updateMatrixWorld(true);
@@ -551,7 +690,6 @@
         rawFrames.push({ t, landmarks: lm });
       }
 
-      // Retime to target game BPM
       const resampledFrames = retimeMocapSequence(rawFrames, sourceBpm, targetBpm, 30);
 
       const moveData = {

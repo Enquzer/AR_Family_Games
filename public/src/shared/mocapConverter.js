@@ -63,14 +63,22 @@ export function findBonePosition(rootOrDict, candidates) {
   for (const name of candidates) {
     const obj = rootOrDict.getObjectByName(name);
     if (obj) {
+      if (obj.matrixWorld && obj.matrixWorld.elements) {
+        const e = obj.matrixWorld.elements;
+        return { x: e[12], y: e[13], z: e[14] };
+      }
       if (typeof obj.getWorldPosition === 'function') {
-        const v = { x: 0, y: 0, z: 0 };
-        // Three.js Vector3 duck typing
-        if (typeof obj.getWorldPosition === 'function') {
-          const temp = { x: 0, y: 0, z: 0 };
-          obj.getWorldPosition(temp);
-          return { x: temp.x, y: temp.y, z: temp.z };
-        }
+        const target = {
+          x: 0, y: 0, z: 0,
+          setFromMatrixPosition(m) {
+            this.x = m.elements[12];
+            this.y = m.elements[13];
+            this.z = m.elements[14];
+            return this;
+          },
+        };
+        obj.getWorldPosition(target);
+        return { x: target.x, y: target.y, z: target.z };
       }
       return { x: obj.position.x, y: obj.position.y, z: obj.position.z };
     }
