@@ -118,20 +118,25 @@ export function scoreDanceMove(playerFrames, targetMove, dtPerFrameSec = 0.033) 
     return { score: 0, timingOffsetMs: 0, isMirror: false, grade: 'MISS' };
   }
 
-  // 4-frame trajectory: ramp-in, hold/peak, hold/peak, ramp-out
-  const targetL = targetMove.hands ? targetMove.hands[0] : [0, 0];
-  const targetR = targetMove.hands ? targetMove.hands[1] : [0, 0];
-  const lowHands = [
-    [targetL[0], targetL[1] * 0.35],
-    [targetR[0], targetR[1] * 0.35],
-  ];
+  // Build reference sequence: use baked mocap frames if available, or generate standard 4-frame trajectory
+  let refSeq;
+  if (targetMove.frames && targetMove.frames.length > 0) {
+    refSeq = targetMove.frames.map(f => f.features || f);
+  } else {
+    const targetL = targetMove.hands ? targetMove.hands[0] : [0, 0];
+    const targetR = targetMove.hands ? targetMove.hands[1] : [0, 0];
+    const lowHands = [
+      [targetL[0], targetL[1] * 0.35],
+      [targetR[0], targetR[1] * 0.35],
+    ];
 
-  const refSeq = [
-    { hands: lowHands, lean: (targetMove.lean || 0) * 0.3, kneeL: (targetMove.kneeL || 0) * 0.3, kneeR: (targetMove.kneeR || 0) * 0.3, twist: (targetMove.twist || 0) * 0.3 },
-    targetMove,
-    targetMove,
-    { hands: lowHands, lean: (targetMove.lean || 0) * 0.3, kneeL: (targetMove.kneeL || 0) * 0.3, kneeR: (targetMove.kneeR || 0) * 0.3, twist: (targetMove.twist || 0) * 0.3 },
-  ];
+    refSeq = [
+      { hands: lowHands, lean: (targetMove.lean || 0) * 0.3, kneeL: (targetMove.kneeL || 0) * 0.3, kneeR: (targetMove.kneeR || 0) * 0.3, twist: (targetMove.twist || 0) * 0.3 },
+      targetMove,
+      targetMove,
+      { hands: lowHands, lean: (targetMove.lean || 0) * 0.3, kneeL: (targetMove.kneeL || 0) * 0.3, kneeR: (targetMove.kneeR || 0) * 0.3, twist: (targetMove.twist || 0) * 0.3 },
+    ];
+  }
 
   // Test regular
   const regular = bandedDTW(playerFrames, refSeq, (a, b) => danceFrameDistance(a, b, false), 4);

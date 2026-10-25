@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dance Mocap Baker & Converter · AR Family Games</title>
+  <link rel="stylesheet" href="/styles/main.css">
+  <style>
+    body {
+      background: #0b0f19;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #1e293b;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      color: #38bdf8;
+    }
+    .badge {
+      background: #1e293b;
+      color: #94a3b8;
+      font-size: 0.75rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 9999px;
+      font-weight: 600;
+    }
+    .layout-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 340px;
+      gap: 1.25rem;
+      flex: 1;
+    }
+    .viewport-card {
+      background: #111827;
+      border-radius: 0.75rem;
+      border: 1px solid #1f2937;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+    .viewport-title {
+      padding: 0.75rem 1rem;
+      background: #1a2234;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: #cbd5e1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .viewport-content {
+      flex: 1;
+      min-height: 440px;
+      position: relative;
+    }
+    canvas {
+      width: 100% !important;
+      height: 100% !important;
+      display: block;
+    }
+    .panel-card {
+      background: #111827;
+      border-radius: 0.75rem;
+      border: 1px solid #1f2937;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      overflow-y: auto;
+      max-height: calc(100vh - 120px);
+    }
+    .section-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #38bdf8;
+      margin-bottom: 0.25rem;
+    }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    label {
+      font-size: 0.8rem;
+      color: #94a3b8;
+    }
+    input[type="text"], input[type="number"], select {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #f1f5f9;
+      padding: 0.5rem 0.65rem;
+      border-radius: 0.375rem;
+      font-size: 0.85rem;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: #38bdf8;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+    .btn {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 0.375rem;
+      padding: 0.6rem 1rem;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+    .btn:hover { background: #1d4ed8; }
+    .btn-secondary {
+      background: #334155;
+      color: #cbd5e1;
+    }
+    .btn-secondary:hover { background: #475569; }
+    .btn-success {
+      background: #059669;
+    }
+    .btn-success:hover { background: #047857; }
+    .metrics-box {
+      background: #1e293b;
+      border-radius: 0.5rem;
+      padding: 0.75rem;
+      font-family: monospace;
+      font-size: 0.75rem;
+      line-height: 1.5;
+      color: #7dd3fc;
+    }
+    .timeline-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      background: #1a2234;
+      border-top: 1px solid #1f2937;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>
+      <span>💃 Dance Mocap Baker</span>
+      <span class="badge">Mixamo FBX → MediaPipe 33-Landmarks</span>
+    </h1>
+    <div style="display: flex; gap: 0.75rem;">
+      <a href="/index.html" class="btn btn-secondary" style="text-decoration: none;">🎮 Back to Game</a>
+      <button id="btnLoadDefault" class="btn btn-secondary">⚡ Load Excited.fbx</button>
+      <label class="btn" style="cursor: pointer;">
+        📂 Load Custom FBX
+        <input type="file" id="fileInput" accept=".fbx" style="display: none;">
+      </label>
+    </div>
+  </div>
+
+  <div class="layout-grid">
+    <!-- Viewport 1: 3D Skinned Model -->
+    <div class="viewport-card">
+      <div class="viewport-title">
+        <span>3D Humanoid Mocap Viewport</span>
+        <span id="txtModelStats" class="badge">No model loaded</span>
+      </div>
+      <div class="viewport-content" id="viewport3D"></div>
+      <div class="timeline-bar">
+        <button id="btnPlayPause" class="btn btn-secondary" style="padding: 0.4rem 0.8rem;">⏸ Pause</button>
+        <input type="range" id="sliderTimeline" min="0" max="1" step="0.001" value="0" style="flex: 1;">
+        <span id="txtTime" style="font-size: 0.8rem; font-family: monospace; min-width: 60px;">0.00s</span>
+      </div>
+    </div>
+
+    <!-- Viewport 2: Converted MediaPipe 33-Landmark Pose -->
+    <div class="viewport-card">
+      <div class="viewport-title">
+        <span>MediaPipe 33-Landmark Stream (30 FPS)</span>
+        <span class="badge" style="background: #0284c7; color: #fff;">Coach View</span>
+      </div>
+      <div class="viewport-content">
+        <canvas id="canvasLandmarks"></canvas>
+      </div>
+      <div class="timeline-bar" style="justify-content: space-between;">
+        <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+          <input type="checkbox" id="chkMirror"> Auto-Mirror (Left ↔ Right)
+        </label>
+        <span id="txtFrameStats" style="font-size: 0.75rem; color: #94a3b8;">Frame: 0 / 0</span>
+      </div>
+    </div>
+
+    <!-- Panel 3: Move Metadata & Baking Controls -->
+    <div class="panel-card">
+      <div class="section-title">Move Metadata</div>
+      <div class="form-group">
+        <label>Move ID</label>
+        <input type="text" id="inpMoveId" value="samba_groove_01">
+      </div>
+      <div class="form-group">
+        <label>Move Display Name</label>
+        <input type="text" id="inpMoveName" value="SAMBA HIP ROLL">
+      </div>
+      <div class="row">
+        <div class="form-group">
+          <label>Style</label>
+          <select id="selStyle">
+            <option value="samba">Samba / Latin</option>
+            <option value="disco">Disco / Funk</option>
+            <option value="groove">Warm-Up Groove</option>
+            <option value="robot">Popping / Robot</option>
+            <option value="climax">Grand Climax</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Difficulty</label>
+          <select id="selDifficulty">
+            <option value="easy">Easy</option>
+            <option value="medium" selected>Medium</option>
+            <option value="hard">Hard</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Player Coaching Tip</label>
+        <input type="text" id="inpTip" value="Roll your hips and bounce on beat!">
+      </div>
+
+      <div class="section-title" style="margin-top: 0.5rem;">Tempo & Resampling</div>
+      <div class="row">
+        <div class="form-group">
+          <label>Clip BPM</label>
+          <input type="number" id="inpClipBpm" value="105">
+        </div>
+        <div class="form-group">
+          <label>Target BPM</label>
+          <input type="number" id="inpTargetBpm" value="112">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Measure Length</label>
+        <select id="selBeats">
+          <option value="2">2 Beats (Fast Step)</option>
+          <option value="4" selected>4 Beats (Full Measure)</option>
+          <option value="8">8 Beats (Choreo Phrase)</option>
+        </select>
+      </div>
+
+      <div class="section-title" style="margin-top: 0.5rem;">Pose Normalization</div>
+      <div class="form-group">
+        <label>Shoulder Scale K: <span id="txtScaleK">0.18</span></label>
+        <input type="range" id="sliderScaleK" min="0.10" max="0.30" step="0.01" value="0.18">
+      </div>
+
+      <div class="section-title" style="margin-top: 0.5rem;">Live Extracted Features</div>
+      <div class="metrics-box" id="metricsBox">
+        Hands: L [0, 0] | R [0, 0]<br>
+        Lean: 0.00 | Twist: 0.00<br>
+        Knees: L 0.00 | R 0.00<br>
+        Hip Amp: 0.00
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: auto;">
+        <button id="btnBakeDownload" class="btn btn-success">💾 Bake & Download Move JSON</button>
+        <button id="btnCopyJson" class="btn btn-secondary">📋 Copy Landmark Stream</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from '/vendor/three/three.module.js';
+    import { FBXLoader } from '/vendor/three/FBXLoader.js';
+    import { convertSkeletonToLandmarks, extractDanceFeatures, mirrorLandmarks, retimeMocapSequence } from '/src/shared/mocapConverter.js';
+
+    // Three.js 3D Viewport Setup
+    const container3D = document.getElementById('viewport3D');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f172a);
+
+    const camera = new THREE.PerspectiveCamera(45, container3D.clientWidth / container3D.clientHeight, 0.1, 100);
+    camera.position.set(0, 1.3, 3.2);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(container3D.clientWidth, container3D.clientHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.shadowMap.enabled = true;
+    container3D.appendChild(renderer.domElement);
+
+    // Grid & Lighting
+    const grid = new THREE.GridHelper(6, 12, 0x38bdf8, 0x1e293b);
+    grid.position.y = 0;
+    scene.add(grid);
+
+    const ambLight = new THREE.AmbientLight(0xffffff, 1.2);
+    scene.add(ambLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.8);
+    dirLight.position.set(3, 8, 5);
+    scene.add(dirLight);
+
+    // 2D MediaPipe Canvas Setup
+    const canvasLM = document.getElementById('canvasLandmarks');
+    const ctx2D = canvasLM.getContext('2d');
+
+    function resizeCanvases() {
+      const w3D = container3D.clientWidth;
+      const h3D = container3D.clientHeight;
+      camera.aspect = w3D / h3D;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w3D, h3D);
+
+      const parentLM = canvasLM.parentElement;
+      canvasLM.width = parentLM.clientWidth * window.devicePixelRatio;
+      canvasLM.height = parentLM.clientHeight * window.devicePixelRatio;
+    }
+    window.addEventListener('resize', resizeCanvases);
+    setTimeout(resizeCanvases, 100);
+
+    // State
+    let currentModel = null;
+    let mixer = null;
+    let action = null;
+    let isPlaying = true;
+    let clipDuration = 0;
+    let currentTime = 0;
+    let lastClockTime = performance.now();
+
+    const fbxLoader = new FBXLoader();
+
+    async function loadFBX(urlOrBlob) {
+      document.getElementById('txtModelStats').textContent = 'Loading FBX...';
+      try {
+        const fbx = await new Promise((resolve, reject) => {
+          fbxLoader.load(urlOrBlob, resolve, undefined, reject);
+        });
+
+        if (currentModel) scene.remove(currentModel);
+        currentModel = fbx;
+        scene.add(currentModel);
+
+        currentModel.position.set(0, 0, 0);
+
+        if (fbx.animations && fbx.animations.length > 0) {
+          mixer = new THREE.AnimationMixer(currentModel);
+          const clip = fbx.animations[0];
+          action = mixer.clipAction(clip);
+          action.play();
+          clipDuration = clip.duration;
+          currentTime = 0;
+          document.getElementById('txtModelStats').textContent = `${clipDuration.toFixed(2)}s · ${Math.round(clipDuration * 30)} frames`;
+        } else {
+          mixer = null;
+          action = null;
+          clipDuration = 2.0;
+          document.getElementById('txtModelStats').textContent = 'Static Model (No Animation)';
+        }
+      } catch (err) {
+        console.error('FBX Load error:', err);
+        document.getElementById('txtModelStats').textContent = 'Error loading FBX';
+      }
+    }
+
+    // Default load Excited.fbx
+    loadFBX('/models/Excited.fbx');
+
+    document.getElementById('btnLoadDefault').addEventListener('click', () => {
+      loadFBX('/models/Excited.fbx');
+    });
+
+    document.getElementById('fileInput').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      loadFBX(url);
+    });
+
+    // Playback controls
+    const btnPlayPause = document.getElementById('btnPlayPause');
+    const sliderTimeline = document.getElementById('sliderTimeline');
+    const txtTime = document.getElementById('txtTime');
+    const chkMirror = document.getElementById('chkMirror');
+    const sliderScaleK = document.getElementById('sliderScaleK');
+    const txtScaleK = document.getElementById('txtScaleK');
+
+    sliderScaleK.addEventListener('input', () => {
+      txtScaleK.textContent = Number(sliderScaleK.value).toFixed(2);
+    });
+
+    btnPlayPause.addEventListener('click', () => {
+      isPlaying = !isPlaying;
+      btnPlayPause.textContent = isPlaying ? '⏸ Pause' : '▶ Play';
+    });
+
+    sliderTimeline.addEventListener('input', () => {
+      if (clipDuration > 0 && mixer) {
+        currentTime = sliderTimeline.value * clipDuration;
+        mixer.setTime(currentTime);
+        currentModel?.updateMatrixWorld(true);
+      }
+    });
+
+    // MediaPipe Skeleton Connections
+    const POSE_CONNECTIONS = [
+      [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], // Upper body
+      [11, 23], [12, 24], [23, 24],                     // Torso
+      [23, 25], [25, 27], [27, 31],                     // Left leg
+      [24, 26], [26, 28], [28, 32],                     // Right leg
+    ];
+
+    function drawLandmarks(landmarks) {
+      const w = canvasLM.width;
+      const h = canvasLM.height;
+      ctx2D.clearRect(0, 0, w, h);
+
+      // Background card
+      ctx2D.fillStyle = '#0f172a';
+      ctx2D.fillRect(0, 0, w, h);
+
+      // Grid guides
+      ctx2D.strokeStyle = '#1e293b';
+      ctx2D.lineWidth = 1;
+      ctx2D.beginPath();
+      ctx2D.moveTo(w * 0.5, 0); ctx2D.lineTo(w * 0.5, h);
+      ctx2D.moveTo(0, h * 0.55); ctx2D.lineTo(w, h * 0.55);
+      ctx2D.stroke();
+
+      // Connective bones
+      ctx2D.lineWidth = 3 * window.devicePixelRatio;
+      ctx2D.strokeStyle = '#38bdf8';
+      for (const [a, b] of POSE_CONNECTIONS) {
+        const pA = landmarks[a];
+        const pB = landmarks[b];
+        if (!pA || !pB || pA[3] <= 0 || pB[3] <= 0) continue;
+
+        ctx2D.beginPath();
+        ctx2D.moveTo(pA[0] * w, pA[1] * h);
+        ctx2D.lineTo(pB[0] * w, pB[1] * h);
+        ctx2D.stroke();
+      }
+
+      // Joint nodes
+      for (let i = 0; i < landmarks.length; i++) {
+        const p = landmarks[i];
+        if (!p || p[3] <= 0) continue;
+        const x = p[0] * w;
+        const y = p[1] * h;
+
+        ctx2D.beginPath();
+        ctx2D.arc(x, y, (i === 0 ? 8 : 4.5) * window.devicePixelRatio, 0, Math.PI * 2);
+        ctx2D.fillStyle = (i === 15 || i === 16) ? '#f43f5e' : (i === 11 || i === 12) ? '#fbbf24' : '#10b981';
+        ctx2D.fill();
+        ctx2D.strokeStyle = '#ffffff';
+        ctx2D.lineWidth = 1.5 * window.devicePixelRatio;
+        ctx2D.stroke();
+      }
+    }
+
+    // Animation Loop
+    function animate() {
+      requestAnimationFrame(animate);
+      const now = performance.now();
+      const dt = (now - lastClockTime) / 1000;
+      lastClockTime = now;
+
+      if (isPlaying && mixer && clipDuration > 0) {
+        currentTime = (currentTime + dt) % clipDuration;
+        mixer.setTime(currentTime);
+        sliderTimeline.value = currentTime / clipDuration;
+        txtTime.textContent = `${currentTime.toFixed(2)}s`;
+      }
+
+      if (currentModel) {
+        currentModel.updateMatrixWorld(true);
+
+        const targetScaleK = parseFloat(sliderScaleK.value);
+        const mirror = chkMirror.checked;
+
+        const lm = convertSkeletonToLandmarks(currentModel, {
+          targetShoulderWidth: targetScaleK,
+          centerX: 0.5,
+          centerY: 0.55,
+          mirror: mirror,
+        });
+
+        drawLandmarks(lm);
+
+        const feats = extractDanceFeatures(lm);
+        document.getElementById('metricsBox').innerHTML = `
+          Hands: L [${feats.handL.x.toFixed(2)}, ${feats.handL.y.toFixed(2)}] | R [${feats.handR.x.toFixed(2)}, ${feats.handR.y.toFixed(2)}]<br>
+          Lean: ${feats.lean.toFixed(2)} | Twist: ${feats.torsoTwist.toFixed(2)}<br>
+          Knees: L ${feats.kneeL.toFixed(2)} | R ${feats.kneeR.toFixed(2)}<br>
+          Hip Amp: ${feats.hipAmp.toFixed(2)}
+        `;
+      }
+
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Baking Functionality
+    function bakeCurrentSequence() {
+      if (!currentModel || !mixer || clipDuration <= 0) {
+        alert('Please load an animated FBX mocap file first!');
+        return null;
+      }
+
+      const sourceBpm = parseFloat(document.getElementById('inpClipBpm').value) || 105;
+      const targetBpm = parseFloat(document.getElementById('inpTargetBpm').value) || 112;
+      const beats = parseInt(document.getElementById('selBeats').value, 10) || 4;
+      const targetScaleK = parseFloat(sliderScaleK.value);
+      const mirror = chkMirror.checked;
+
+      const durationSec = beats * (60 / sourceBpm);
+      const clampedDuration = Math.min(clipDuration, durationSec);
+      const sampleFps = 30;
+      const rawFrames = [];
+
+      // Sample original animation at 30 FPS
+      for (let t = 0; t <= clampedDuration; t += 1 / sampleFps) {
+        mixer.setTime(t);
+        currentModel.updateMatrixWorld(true);
+        const lm = convertSkeletonToLandmarks(currentModel, {
+          targetShoulderWidth: targetScaleK,
+          centerX: 0.5,
+          centerY: 0.55,
+          mirror: mirror,
+        });
+        rawFrames.push({ t, landmarks: lm });
+      }
+
+      // Retime to target game BPM
+      const resampledFrames = retimeMocapSequence(rawFrames, sourceBpm, targetBpm, 30);
+
+      const moveData = {
+        id: document.getElementById('inpMoveId').value.trim(),
+        name: document.getElementById('inpMoveName').value.trim(),
+        style: document.getElementById('selStyle').value,
+        difficulty: document.getElementById('selDifficulty').value,
+        bpm: targetBpm,
+        beats: beats,
+        tip: document.getElementById('inpTip').value.trim(),
+        fps: 30,
+        frameCount: resampledFrames.length,
+        frames: resampledFrames,
+      };
+
+      return moveData;
+    }
+
+    document.getElementById('btnBakeDownload').addEventListener('click', () => {
+      const data = bakeCurrentSequence();
+      if (!data) return;
+      const jsonStr = JSON.stringify(data, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${data.id}_baked.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    document.getElementById('btnCopyJson').addEventListener('click', async () => {
+      const data = bakeCurrentSequence();
+      if (!data) return;
+      await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+      alert(`Copied ${data.frames.length} frames of baked 33-landmark dance move to clipboard!`);
+    });
+  </script>
+</body>
+</html>

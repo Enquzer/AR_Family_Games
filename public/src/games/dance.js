@@ -19,6 +19,8 @@ import { buildDanceClub } from '../engine/environments.js';
 import { FemaleCoachAvatar } from '../engine/femaleAvatar.js';
 import { clamp, damp } from '../shared/math.js';
 import { scoreDanceMove } from '../shared/dtw.js';
+import { generateReferenceLandmarkFrames } from './danceLibrary.js';
+import { crossfadeLandmarks } from '../shared/mocapConverter.js';
 
 const INTRO_BEATS = 4;
 const BEATS_PER_MOVE = 2;
@@ -331,9 +333,16 @@ export class DanceGame extends BaseGame {
     this.subtitle = 'Rhythm Club · Follow the Coach';
     this.phase = 'waiting';
 
-    this.moves = DANCE_ROUTINE;
+    this.moves = DANCE_ROUTINE.map(m => {
+      if (!m.frames) {
+        m.frames = generateReferenceLandmarkFrames(m, 30);
+      }
+      return m;
+    });
     this.moveIndex = 0;
     this.currentMove = this.moves[0];
+    this.prevMove = null;
+    this.moveStartTime = 0;
     this.bpm = this.currentMove.bpm;
 
     this.routineStart = 0;
@@ -638,10 +647,12 @@ export class DanceGame extends BaseGame {
     const moveBeat = danceBeat % BEATS_PER_MOVE;
 
     // Dynamic Tempo Acceleration: update BPM to match current move
-    if (moveIdx < this.moves.length) {
+    if (moveIdx < this.moves.length && moveIdx !== this.moveIndex) {
+      this.prevMove = this.moves[this.moveIndex];
       this.moveIndex = moveIdx;
       this.currentMove = this.moves[moveIdx];
       this.bpm = this.currentMove.bpm;
+      this.moveStartTime = localTime;
     }
 
     // Play dynamic rhythmic percussion
@@ -676,6 +687,80 @@ export class DanceGame extends BaseGame {
 
     const move = this.currentMove || this.moves[0];
     const beatSec = 60 / this.bpm;
+    const p = this.coachPose;
+
+    // Optional baked mocap landmark stream playback with 0.25-beat crossfading
+    if (move.useBakedFrames && move.frames && move.frames.length > 0) {
+      const moveDuration = (move.beats || BEATS_PER_MOVE) * beatSec;
+      const timeInMove = Math.max(0, localTime - (this.moveStartTime || 0));
+      const normalizedTime = timeInMove % moveDuration;
+      const frameIdx = Math.min(move.frames.length - 1, Math.floor((normalizedTime / moveDuration) * move.frames.length));
+      let currentLm = move.frames[frameIdx].landmarks;
+
+      // 0.25-beat crossfading from previous move
+      const crossfadeDuration = 0.25 * beatSec;
+      if (this.prevMove?.frames?.length && timeInMove < crossfadeDuration) {
+        const alpha = timeInMove / crossfadeDuration;
+        const prevLastLm = this.prevMove.frames[this.prevMove.frames.length - 1].landmarks;
+        currentLm = crossfadeLandmarks(prevLastLm, currentLm, alpha);
+      }
+
+      const lmToWorld = (lm) => ({
+        x: (lm[0] - 0.5) * 1.8,
+        y: (0.95 - lm[1]) * 1.8,
+        z: (lm[2] || 0) * 1.5,
+      });
+
+      const h = lmToWorld(currentLm[0]);
+      p.head.set(h.x, h.y + 0.08, h.z);
+      const sL = lmToWorld(currentLm[11]);
+      const sR = lmToWorld(currentLm[12]);
+      p.shL.set(sL.x, sL.y, sL.z);
+      p.shR.set(sR.x, sR.y, sR.z);
+      p.neck.set((sL.x + sR.x) * 0.5, (sL.y + sR.y) * 0.5, (sL.z + sR.z) * 0.5);
+
+      const eL = lmToWorld(currentLm[13]);
+      const eR = lmToWorld(currentLm[14]);
+      p.elL.set(eL.x, eL.y, eL.z);
+      p.elR.set(eR.x, eR.y, eR.z);
+
+      const wL = lmToWorld(currentLm[15]);
+      const wR = lmToWorld(currentLm[16]);
+      p.wrL.set(wL.x, wL.y, wL.z);
+      p.wrR.set(wR.x, wR.y, wR.z);
+
+      const hpL = lmToWorld(currentLm[23]);
+      const hpR = lmToWorld(currentLm[24]);
+      p.hipL.set(hpL.x, hpL.y, hpL.z);
+      p.hipR.set(hpR.x, hpR.y, hpR.z);
+      p.hip.set((hpL.x + hpR.x) * 0.5, (hpL.y + hpR.y) * 0.5, (hpL.z + hpR.z) * 0.5);
+
+      const kL = lmToWorld(currentLm[25]);
+      const kR = lmToWorld(currentLm[26]);
+      p.knL.set(kL.x, kL.y, kL.z);
+      p.knR.set(kR.x, kR.y, kR.z);
+
+      const aL = lmToWorld(currentLm[27]);
+      const aR = lmToWorld(currentLm[28]);
+      p.anL.set(aL.x, aL.y, aL.z);
+      p.anR.set(aR.x, aR.y, aR.z);
+
+      const fL = lmToWorld(currentLm[31]);
+      const fR = lmToWorld(currentLm[32]);
+      p.ftL.set(fL.x, Math.max(0.04, fL.y), fL.z);
+      p.ftR.set(fR.x, Math.max(0.04, fR.y), fR.z);
+
+      this.coach.facing = 0;
+      this.coach.facingTarget = 0;
+      this.coach.group.position.copy(this.coachHome);
+      this.coach.update(null, null, dt, {
+        active: false,
+        poseTargets: this.coachPose,
+        poseLambda: 18,
+      });
+      return;
+    }
+
     const beatPhase = (localTime / beatSec) % 1;
     const beatPulse = Math.sin(beatPhase * Math.PI * 2);
     const bounce = Math.abs(Math.sin(beatPhase * Math.PI)); // Vertical knee compression on beat
