@@ -10,7 +10,7 @@
  */
 import http from 'node:http';
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { stat, readdir } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -80,6 +80,35 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: true, message: 'Server shutting down' }));
       console.log('[server] Shutdown requested via gesture/UI. Exiting process...');
       setTimeout(() => process.exit(0), 400);
+      return;
+    }
+
+    if (req.url === '/api/dance-files') {
+      const danceDir = path.join(ROOT, 'models', 'dance');
+      const movesDir = path.join(ROOT, 'assets', 'dance', 'moves');
+      const musicDir = path.join(ROOT, 'assets', 'dance', 'music');
+
+      const safeRead = async (dir) => {
+        try {
+          return await readdir(dir);
+        } catch {
+          return [];
+        }
+      };
+
+      const [fbxFiles, jsonMoves, musicFiles] = await Promise.all([
+        safeRead(danceDir),
+        safeRead(movesDir),
+        safeRead(musicDir),
+      ]);
+
+      const body = JSON.stringify({
+        fbx: fbxFiles.filter((f) => f.toLowerCase().endsWith('.fbx')),
+        moves: jsonMoves.filter((f) => f.toLowerCase().endsWith('.json')),
+        music: musicFiles.filter((f) => /\.(mp3|wav|ogg|m4a)$/i.test(f)),
+      });
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(body);
       return;
     }
 

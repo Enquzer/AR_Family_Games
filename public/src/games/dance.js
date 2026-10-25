@@ -363,6 +363,28 @@ export class DanceGame extends BaseGame {
     this.moveStartTime = 0;
     this.bpm = this.currentMove.bpm;
 
+    // Auto-discover moves from public/assets/dance/moves/
+    if (typeof fetch === 'function') {
+      fetch('/api/dance-files')
+        .then(res => res.ok ? res.json() : null)
+        .then(async data => {
+          if (!data || !Array.isArray(data.moves)) return;
+          for (const filename of data.moves) {
+            try {
+              const mRes = await fetch(`/assets/dance/moves/${filename}`);
+              if (mRes.ok) {
+                const moveData = await mRes.json();
+                moveData.useBakedFrames = true;
+                if (!this.moves.some(m => m.id === moveData.id)) {
+                  this.moves.unshift(moveData);
+                }
+              }
+            } catch {}
+          }
+        })
+        .catch(() => {});
+    }
+
     this.routineStart = 0;
     this.danceEnd = 0;
     this.lastBeat = -1;

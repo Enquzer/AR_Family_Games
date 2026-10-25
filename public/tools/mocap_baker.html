@@ -315,10 +315,13 @@
     </div>
     <div style="display: flex; gap: 0.5rem;">
       <a href="/index.html" class="btn btn-secondary" style="text-decoration: none;">🎮 Back to Game</a>
-      <div id="fbxHeaderActions" style="display: flex; gap: 0.5rem;">
+      <div id="fbxHeaderActions" style="display: flex; gap: 0.5rem; align-items: center;">
+        <select id="selDiscoveredFbx" style="max-width: 190px; padding: 0.45rem 0.6rem; font-size: 0.8rem;">
+          <option value="">📁 Models in public/models/dance...</option>
+        </select>
         <button id="btnLoadDefault" class="btn btn-secondary">⚡ Excited.fbx</button>
         <label class="btn" style="cursor: pointer;">
-          📂 Load FBX
+          📂 Load Local FBX
           <input type="file" id="fileInput" accept=".fbx" style="display: none;">
         </label>
       </div>
@@ -685,6 +688,39 @@
       }
     }
     loadDefaultModel();
+
+    async function refreshDiscoveredFiles() {
+      try {
+        const res = await fetch('/api/dance-files');
+        if (!res.ok) return;
+        const data = await res.json();
+        const selFbx = document.getElementById('selDiscoveredFbx');
+        selFbx.innerHTML = '<option value="">📁 Models in public/models/dance...</option>';
+        (data.fbx || []).forEach(f => {
+          const opt = document.createElement('option');
+          opt.value = `/models/dance/${f}`;
+          opt.textContent = `🕺 ${f}`;
+          selFbx.appendChild(opt);
+        });
+      } catch {}
+    }
+    refreshDiscoveredFiles();
+
+    document.getElementById('selDiscoveredFbx').addEventListener('change', async (e) => {
+      const url = e.target.value;
+      if (!url) return;
+      document.getElementById('txtModelStats').textContent = `Loading ${url}...`;
+      try {
+        const res = await fetch(url);
+        const buf = await res.arrayBuffer();
+        const fbx = fbxLoader.parse(buf, '/models/dance/');
+        const name = url.split('/').pop();
+        setupLoadedFBX(fbx, name);
+      } catch (err) {
+        console.error('Failed to load discovered FBX:', err);
+        document.getElementById('txtModelStats').textContent = `Load Error: ${err.message}`;
+      }
+    });
 
     document.getElementById('btnLoadDefault').addEventListener('click', loadDefaultModel);
 
