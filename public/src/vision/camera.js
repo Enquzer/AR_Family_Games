@@ -36,19 +36,36 @@ export async function startCamera(video, { deviceId = null, width = 640, height 
   try {
     stream = await navigator.mediaDevices.getUserMedia(constraints);
   } catch (err) {
-    if (err.name === 'NotAllowedError') {
-      throw new Error('Camera permission was blocked. Click the camera icon in the address bar and allow access.');
-    }
-    if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-      throw new Error('No camera found. Connect a webcam and reload.');
-    }
-    if (err.name === 'NotReadableError') {
-      throw new Error('The camera is busy in another app (Zoom/Teams?). Close it and try again.');
-    }
-    if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { deviceId: deviceId ? { exact: deviceId } : undefined, frameRate: { ideal: 30 } } });
-    } else {
-      throw err;
+    console.warn('[camera] First constraints attempt failed, trying fallback...', err);
+    try {
+      // Fallback 1: Flexible resolution without strict framerate
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          width: { ideal: width },
+          height: { ideal: height },
+        },
+      });
+    } catch (err2) {
+      try {
+        // Fallback 2: Any video input device without resolution constraints
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: true,
+        });
+      } catch (err3) {
+        if (err3.name === 'NotAllowedError') {
+          throw new Error('Camera permission blocked. Click "Allow" or click the camera button to enable.');
+        }
+        if (err3.name === 'NotFoundError' || err3.name === 'DevicesNotFoundError') {
+          throw new Error('No camera found. Connect a webcam and reload.');
+        }
+        if (err3.name === 'NotReadableError') {
+          throw new Error('Camera is in use by another app or tab (Zoom/Teams/browser tab). Please close it and reload.');
+        }
+        throw err3;
+      }
     }
   }
   video.srcObject = stream;

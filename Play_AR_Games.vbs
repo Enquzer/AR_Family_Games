@@ -46,14 +46,17 @@ For attempts = 1 To 10
     On Error GoTo 0
 Next
 
-' 3. Select best available browser in dedicated standalone App Mode (no tabs, no URL bar)
+' 3. Select best available browser in dedicated standalone App Mode with camera permissions enabled
 chromePath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 edgePath = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 
-If fso.FileExists(chromePath) Then
-    browserCmd = """" & chromePath & """ --app=http://localhost:3000/ --start-maximized"
-ElseIf fso.FileExists(edgePath) Then
-    browserCmd = """" & edgePath & """ --app=http://localhost:3000/ --start-maximized"
+Dim flags
+flags = " --app=http://localhost:3000/ --start-maximized --use-fake-ui-for-media-stream --autoplay-policy=no-user-gesture-required"
+
+If fso.FileExists(edgePath) Then
+    browserCmd = """" & edgePath & """" & flags
+ElseIf fso.FileExists(chromePath) Then
+    browserCmd = """" & chromePath & """" & flags
 Else
     browserCmd = "cmd /c start http://localhost:3000/"
 End If

@@ -1064,6 +1064,13 @@ function initClicks() {
   $('#camera-toggle-btn')?.addEventListener('click', () => {
     if (!cameraActive) startCameraTracking();
   });
+
+  // Re-request camera on user click if blocked by browser policy
+  window.addEventListener('click', (e) => {
+    if (!cameraActive && !cameraStarting && e.target.id !== 'gesture-exit-sys') {
+      startCameraTracking();
+    }
+  });
 }
 
 /* ------------------------------------------------------------------ */
