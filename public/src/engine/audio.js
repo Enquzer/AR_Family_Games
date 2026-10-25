@@ -7,6 +7,13 @@ export class AudioKit {
     this.master = null;
     this.muted = false;
     this.volume = 0.6;
+
+    // Custom Audio Music Track State
+    this.musicTrack = null;
+    this.musicSource = null;
+    this.musicGain = null;
+    this.danceMusicMuted = false;
+    this.lastDanceStep = -1;
   }
 
   async unlock() {
@@ -349,5 +356,282 @@ export class AudioKit {
     const interval = 60 / bpm;
     this.tone({ freq: 55, to: 40, dur: 0.08, type: 'sine', gain: 0.18 });
     this.tone({ freq: 45, to: 38, dur: 0.07, type: 'sine', gain: 0.12, delay: interval * 0.35 });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Custom MP3 / Audio Track Loading & Playback                        */
+  /* ------------------------------------------------------------------ */
+
+  async loadMusicTrack(fileOrUrl) {
+    await this.unlock();
+    if (!this.ctx) return false;
+
+    try {
+      let arrayBuffer;
+      if (typeof fileOrUrl === 'string') {
+        const res = await fetch(fileOrUrl);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        arrayBuffer = await res.arrayBuffer();
+      } else if (fileOrUrl instanceof Blob || fileOrUrl instanceof File) {
+        arrayBuffer = await fileOrUrl.arrayBuffer();
+      } else {
+        throw new Error('Unsupported music source');
+      }
+
+      this.musicTrack = await this.ctx.decodeAudioData(arrayBuffer);
+      return true;
+    } catch (err) {
+      console.warn('[AudioKit] Failed to decode music track:', err);
+      return false;
+    }
+  }
+
+  playMusicTrack({ loop = true, volume = 0.7, startTime = 0 } = {}) {
+    if (!this.ctx || !this.musicTrack) return false;
+    this.stopMusicTrack();
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.musicTrack;
+    src.loop = loop;
+
+    const gainNode = this.ctx.createGain();
+    gainNode.gain.setValueAtTime(this.muted ? 0 : volume * this.volume, this.ctx.currentTime);
+
+    src.connect(gainNode).connect(this.master);
+    src.start(0, Math.max(0, startTime));
+
+    this.musicSource = src;
+    this.musicGain = gainNode;
+    return true;
+  }
+
+  stopMusicTrack() {
+    if (this.musicSource) {
+      try {
+        this.musicSource.stop();
+        this.musicSource.disconnect();
+      } catch {}
+      this.musicSource = null;
+    }
+  }
+
+  isMusicTrackLoaded() {
+    return !!this.musicTrack;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Procedural Genre-Specific Dance Music Engine                       */
+  /* ------------------------------------------------------------------ */
+
+  playDrumKick({ punch = 1.0, sub = true, dur = 0.22, delay = 0 } = {}) {
+    if (!this.ctx || this.muted) return;
+    this.tone({ freq: 110 * punch, to: 38, dur: dur * 0.8, type: 'sine', gain: 0.45 * punch, delay });
+    if (sub) {
+      this.tone({ freq: 65 * punch, to: 28, dur: dur * 1.1, type: 'sine', gain: 0.35 * punch, delay });
+    }
+    this.noise({ dur: 0.04, gain: 0.25 * punch, freq: 1200, q: 2.0, type: 'bandpass', delay });
+  }
+
+  playDrumSnare({ snappy = true, gain = 0.28, delay = 0 } = {}) {
+    if (!this.ctx || this.muted) return;
+    this.noise({ dur: 0.16, gain: gain * 1.1, freq: 2400, q: 1.0, type: 'highpass', delay });
+    this.tone({ freq: 210, to: 120, dur: 0.12, type: 'triangle', gain: gain * 0.9, delay });
+  }
+
+  playHiHat({ open = false, gain = 0.12, delay = 0 } = {}) {
+    if (!this.ctx || this.muted) return;
+    const dur = open ? 0.24 : 0.05;
+    this.noise({ dur, gain, freq: 8500, q: 2.5, type: 'highpass', delay });
+  }
+
+  playAgogo({ high = false, delay = 0 } = {}) {
+    if (!this.ctx || this.muted) return;
+    const freq = high ? 880 : 587.33; // A5 vs D5
+    this.tone({ freq, to: freq * 0.97, dur: 0.18, type: 'sine', gain: 0.22, delay });
+    this.tone({ freq: freq * 2.02, to: freq * 1.95, dur: 0.09, type: 'triangle', gain: 0.08, delay });
+  }
+
+  playShaker({ accent = false, delay = 0 } = {}) {
+    if (!this.ctx || this.muted) return;
+    const gain = accent ? 0.10 : 0.05;
+    this.noise({ dur: 0.04, gain, freq: 6500, q: 1.8, type: 'bandpass', delay });
+  }
+
+  playBassNote({ freq = 65.41, dur = 0.25, type = 'sawtooth', gain = 0.28, delay = 0 } = {}) {
+    if (!this.ctx || this.muted) return;
+    this.tone({ freq, to: freq * 0.98, dur, type, gain: gain * 0.85, delay });
+    this.tone({ freq: freq * 0.5, to: freq * 0.5, dur, type: 'sine', gain: gain * 0.9, delay });
+  }
+
+  playChordStab({ freqs = [], dur = 0.22, gain = 0.12, type = 'triangle', delay = 0 } = {}) {
+    if (!this.ctx || this.muted || !freqs.length) return;
+    const noteGain = gain / Math.sqrt(freqs.length);
+    for (const f of freqs) {
+      this.tone({ freq: f, dur, type, gain: noteGain, delay });
+    }
+  }
+
+  /**
+   * Evaluates the active 16th-note step for the requested dance style
+   * and triggers the corresponding rhythmic and harmonic instruments.
+   */
+  stepDanceMusic({ style = 'samba', bpm = 112, step = 0 } = {}) {
+    if (!this.ctx || this.muted || this.danceMusicMuted) return;
+    if (this.musicSource) return; // Custom audio file track is currently active
+
+    const s = ((step % 16) + 16) % 16;
+    const measure = Math.floor(step / 16);
+
+    switch (style) {
+      case 'samba': {
+        // --- SAMBA / LATIN HEAT ---
+        this.playShaker({ accent: s % 2 === 1 });
+
+        // Surdo Bass Drum: syncopated Latin groove
+        if (s === 0) this.playDrumKick({ punch: 0.8, sub: true });
+        if (s === 4) this.playDrumKick({ punch: 1.2, sub: true });
+        if (s === 10) this.playDrumKick({ punch: 0.9, sub: true });
+        if (s === 12) this.playDrumKick({ punch: 1.3, sub: true });
+
+        // Agogô Bells: syncopated batucada bell pattern
+        if (s === 0 || s === 6 || s === 10) this.playAgogo({ high: false });
+        if (s === 3 || s === 8 || s === 12 || s === 14) this.playAgogo({ high: true });
+
+        // Latin Tumbao Bassline
+        const roots = [55.0, 73.42, 65.41, 48.99]; // A1, D2, C2, G1
+        const root = roots[measure % roots.length];
+        if (s === 6) this.playBassNote({ freq: root * 1.5, dur: 0.22, gain: 0.25 });
+        if (s === 12) this.playBassNote({ freq: root, dur: 0.28, gain: 0.30 });
+        if (s === 14) this.playBassNote({ freq: root * 1.25, dur: 0.16, gain: 0.22 });
+
+        // Latin Montuno Chord Stabs: Dm7 / G9 / Cmaj7 / A7
+        const montunoChords = [
+          [293.66, 349.23, 440.0, 523.25], // Dm7
+          [392.00, 493.88, 587.33, 698.46], // G9
+          [261.63, 329.63, 392.00, 493.88], // Cmaj7
+          [220.00, 277.18, 329.63, 392.00], // A7
+        ];
+        const chord = montunoChords[measure % montunoChords.length];
+        if (s === 2 || s === 5 || s === 8 || s === 11 || s === 14) {
+          this.playChordStab({ freqs: chord, dur: 0.14, gain: 0.11, type: 'triangle' });
+        }
+        break;
+      }
+
+      case 'disco': {
+        // --- DISCO INFERNO (126 BPM) ---
+        // Four-on-the-Floor Kick on every quarter note
+        if (s % 4 === 0) {
+          this.playDrumKick({ punch: 1.15, sub: true });
+        }
+
+        // Snare on beats 2 & 4
+        if (s === 4 || s === 12) {
+          this.playDrumSnare({ snappy: true, gain: 0.32 });
+        }
+
+        // Open Hi-Hat on offbeat eighth notes ("and" = 2, 6, 10, 14)
+        if (s % 4 === 2) {
+          this.playHiHat({ open: true, gain: 0.14 });
+        } else if (s % 2 === 0) {
+          this.playHiHat({ open: false, gain: 0.08 });
+        }
+
+        // Funky Slap Bass: Octave jump bounce
+        const discoBass = [
+          82.41, 164.81, 82.41, 196.00, // E2, E3, E2, G3
+          98.00, 196.00, 110.00, 220.00, // G2, G3, A2, A3
+        ];
+        const note = discoBass[Math.floor(s / 2) % discoBass.length];
+        if (s % 2 === 0) {
+          this.playBassNote({ freq: note, dur: 0.16, type: 'sawtooth', gain: 0.28 });
+        }
+
+        // Disco Brass / String Chords
+        const discoChords = [
+          [329.63, 392.00, 493.88, 587.33], // Em7
+          [349.23, 440.00, 523.25, 659.25], // Fmaj7
+          [392.00, 493.88, 587.33, 698.46], // G7
+          [440.00, 554.37, 659.25, 783.99], // A7
+        ];
+        const dChord = discoChords[measure % discoChords.length];
+        if (s === 0 || s === 6 || s === 10) {
+          this.playChordStab({ freqs: dChord, dur: 0.18, gain: 0.13, type: 'sawtooth' });
+        }
+        break;
+      }
+
+      case 'robot': {
+        // --- POPPING / ROBOT ELECTRO (136 BPM) ---
+        if (s === 0 || s === 6 || s === 10) {
+          this.playDrumKick({ punch: 1.3, sub: true, dur: 0.35 });
+        }
+        if (s === 4 || s === 12) {
+          this.playDrumSnare({ snappy: true, gain: 0.35 });
+        }
+        this.playHiHat({ open: s === 14, gain: 0.07 });
+
+        // Robotic Sawtooth Arpeggio Bass
+        const robotNotes = [65.41, 77.78, 87.31, 98.00, 116.54, 130.81, 116.54, 87.31];
+        const rNote = robotNotes[s % robotNotes.length];
+        this.playBassNote({ freq: rNote, dur: 0.09, type: 'sawtooth', gain: 0.22 });
+
+        if (s === 15) {
+          this.tone({ freq: 1200, to: 280, dur: 0.11, type: 'sine', gain: 0.16 });
+        }
+        break;
+      }
+
+      case 'climax': {
+        // --- GRAND CLIMAX / FESTIVAL EDM (142 BPM) ---
+        if (s % 4 === 0) {
+          this.playDrumKick({ punch: 1.4, sub: true, dur: 0.3 });
+        }
+        if (s % 2 === 1) {
+          this.playHiHat({ open: true, gain: 0.15 });
+        }
+        if (s === 4 || s === 12) {
+          this.playDrumSnare({ snappy: true, gain: 0.4 });
+        }
+
+        const climaxNotes = [130.81, 164.81, 196.00, 261.63];
+        const cNote = climaxNotes[s % climaxNotes.length];
+        this.playBassNote({ freq: cNote * 0.5, dur: 0.12, type: 'sawtooth', gain: 0.32 });
+        this.tone({ freq: cNote * 2, dur: 0.08, type: 'sawtooth', gain: 0.14 });
+        break;
+      }
+
+      case 'groove':
+      default: {
+        // --- WARM-UP GROOVE / LO-FI R&B (96 BPM) ---
+        if (s === 0 || s === 10) {
+          this.playDrumKick({ punch: 0.9, sub: true, dur: 0.25 });
+        }
+        if (s === 4 || s === 12) {
+          this.playDrumSnare({ snappy: false, gain: 0.24 });
+        }
+        if (s % 2 === 0) {
+          this.playHiHat({ open: false, gain: 0.06 });
+        }
+
+        const grooveBass = [65.41, 65.41, 87.31, 77.78];
+        const gNote = grooveBass[Math.floor(s / 4) % grooveBass.length];
+        if (s % 4 === 0) {
+          this.playBassNote({ freq: gNote, dur: 0.35, type: 'sine', gain: 0.32 });
+        }
+
+        const rhodesChords = [
+          [261.63, 311.13, 392.00, 466.16],
+          [220.00, 261.63, 329.63, 392.00],
+          [174.61, 220.00, 261.63, 329.63],
+          [196.00, 246.94, 293.66, 349.23],
+        ];
+        const rChord = rhodesChords[measure % rhodesChords.length];
+        if (s === 0 || s === 8) {
+          this.playChordStab({ freqs: rChord, dur: 0.45, gain: 0.10, type: 'sine' });
+        }
+        break;
+      }
+    }
   }
 }

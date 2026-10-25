@@ -366,6 +366,7 @@ export class DanceGame extends BaseGame {
     this.routineStart = 0;
     this.danceEnd = 0;
     this.lastBeat = -1;
+    this.lastStep = -1;
     this.resultsEnd = 0;
     this.feedbackTimer = 0;
 
@@ -552,6 +553,8 @@ export class DanceGame extends BaseGame {
     for (const p of this.players) p.dance = blankDance();
 
     this.#placePlayers();
+    this.ctx.audio?.unlock?.();
+    this.ctx.audio?.playMusicTrack?.({ loop: true, volume: 0.7 });
     this.ctx.audio.play('danceStart');
   }
 
@@ -596,6 +599,17 @@ export class DanceGame extends BaseGame {
     if (beat !== this.lastBeat) {
       this.lastBeat = beat;
       this.#onBeat(beat, localTime);
+    }
+
+    // Step 16th-note procedural genre-specific dance music
+    if (this.phase === 'dance') {
+      const sixteenthSec = beatSec * 0.25;
+      const currentStep = Math.floor(localTime / sixteenthSec);
+      if (currentStep !== this.lastStep) {
+        this.lastStep = currentStep;
+        const style = this.currentMove?.style || 'samba';
+        this.ctx.audio?.stepDanceMusic?.({ style, bpm: this.bpm, step: currentStep });
+      }
     }
 
     // Step continuous full-body dance kinematics for the Coach
@@ -1012,6 +1026,7 @@ export class DanceGame extends BaseGame {
 
   #endDance() {
     if (this.phase === 'podium' || this.phase === 'results') return;
+    this.ctx.audio?.stopMusicTrack?.();
     this.phase = 'podium';
     this.resultsEnd = this.time + 9999; // NO AUTO-LOOP! Halts on victory podium until user rematches!
 

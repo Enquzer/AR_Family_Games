@@ -419,6 +419,20 @@
         </div>
       </div>
 
+      <div class="form-group" style="margin-top: 0.25rem;">
+        <label>Soundtrack & Music</label>
+        <select id="selMusicMode">
+          <option value="synth" selected>🎹 Procedural Synth Beats (Auto-syncs to Style & BPM)</option>
+          <option value="custom">🎵 Custom Song File (Upload MP3 / WAV)</option>
+          <option value="muted">🔇 Mute Audio</option>
+        </select>
+      </div>
+      <div id="customAudioFileGroup" style="display: none; flex-direction: column; gap: 0.35rem;">
+        <label>Select Music Track (.mp3, .wav, .ogg)</label>
+        <input type="file" id="musicFileInput" accept="audio/*">
+        <span id="txtMusicTrackStatus" style="font-size: 0.75rem; color: #38bdf8;">No custom song loaded</span>
+      </div>
+
       <!-- Live Webcam Action Block -->
       <div id="liveRecordBlock" style="display: none; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem;">
         <button id="btnStartRecordLive" class="btn btn-record">
@@ -473,6 +487,7 @@
       retimeMocapSequence,
     } from '/src/shared/mocapConverter.js';
     import { PoseEngine } from '/src/app/poseEngine.js';
+    import { AudioKit } from '/src/engine/audio.js';
 
     // State
     let activeMode = 'fbx'; // 'fbx' | 'live'
@@ -484,25 +499,18 @@
     let clipDuration = 0;
     let currentTime = 0;
     let lastClockTime = performance.now();
+    let lastStudioStep = -1;
 
     // Baked Sequence Memory
     let activeRecordedFrames = null;
 
-    // Web Audio Metronome & Cues
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // Audio Engine
+    const audioKit = new AudioKit();
+
     function playBeep(freq = 440, duration = 0.08, type = 'sine') {
       try {
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + duration);
+        audioKit.unlock();
+        audioKit.tone({ freq, dur: duration, type, gain: 0.25 });
       } catch {}
     }
 
@@ -844,6 +852,44 @@
     const txtScaleK = document.getElementById('txtScaleK');
     const metronomeDot = document.getElementById('metronomeDot');
 
+    // Soundtrack Controls
+    const selMusicMode = document.getElementById('selMusicMode');
+    const customAudioFileGroup = document.getElementById('customAudioFileGroup');
+    const musicFileInput = document.getElementById('musicFileInput');
+    const txtMusicTrackStatus = document.getElementById('txtMusicTrackStatus');
+
+    selMusicMode.addEventListener('change', () => {
+      const mode = selMusicMode.value;
+      customAudioFileGroup.style.display = mode === 'custom' ? 'flex' : 'none';
+      if (mode === 'muted') {
+        audioKit.setMuted(true);
+        audioKit.stopMusicTrack();
+      } else {
+        audioKit.setMuted(false);
+        audioKit.unlock();
+        if (mode === 'custom' && audioKit.isMusicTrackLoaded() && isPlaying) {
+          audioKit.playMusicTrack({ loop: true, startTime: currentTime });
+        } else if (mode === 'synth') {
+          audioKit.stopMusicTrack();
+        }
+      }
+    });
+
+    musicFileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      txtMusicTrackStatus.textContent = `Loading ${file.name}...`;
+      const ok = await audioKit.loadMusicTrack(file);
+      if (ok) {
+        txtMusicTrackStatus.textContent = `🎵 ${file.name} ready!`;
+        if (isPlaying && selMusicMode.value === 'custom') {
+          audioKit.playMusicTrack({ loop: true, startTime: currentTime });
+        }
+      } else {
+        txtMusicTrackStatus.textContent = `Failed to decode audio file`;
+      }
+    });
+
     sliderScaleK.addEventListener('input', () => {
       txtScaleK.textContent = Number(sliderScaleK.value).toFixed(2);
     });
@@ -851,12 +897,22 @@
     btnPlayPause.addEventListener('click', () => {
       isPlaying = !isPlaying;
       btnPlayPause.textContent = isPlaying ? '⏸ Pause' : '▶ Play';
+      if (isPlaying) {
+        if (selMusicMode.value === 'custom' && audioKit.isMusicTrackLoaded()) {
+          audioKit.playMusicTrack({ loop: true, startTime: currentTime });
+        }
+      } else {
+        audioKit.stopMusicTrack();
+      }
     });
 
     sliderTimeline.addEventListener('input', () => {
       if (clipDuration > 0) {
         currentTime = sliderTimeline.value * clipDuration;
         if (mixer) mixer.setTime(currentTime);
+        if (isPlaying && selMusicMode.value === 'custom' && audioKit.isMusicTrackLoaded()) {
+          audioKit.playMusicTrack({ loop: true, startTime: currentTime });
+        }
       }
     });
 
@@ -933,6 +989,18 @@
         lastBeat = beatIdx;
         metronomeDot.classList.add('beat');
         setTimeout(() => metronomeDot.classList.remove('beat'), 100);
+      }
+
+      // Procedural dance music 16th-note rhythm stepping
+      const sixteenthSec = beatSec * 0.25;
+      const stepIdx = Math.floor((isPlaying ? currentTime : 0) / sixteenthSec);
+      if (isPlaying && stepIdx !== lastStudioStep) {
+        lastStudioStep = stepIdx;
+        if (selMusicMode.value === 'synth') {
+          audioKit.unlock();
+          const style = document.getElementById('selStyle').value || 'samba';
+          audioKit.stepDanceMusic({ style, bpm, step: stepIdx });
+        }
       }
 
       // --- BRANCH A: LIVE WEBCAM ACTIVE STREAM ---
