@@ -19,7 +19,7 @@ test('Discovered baked dance moves load accurately from public/assets/dance/move
   const movesDir = path.resolve('public/assets/dance/moves');
   assert.ok(fs.existsSync(movesDir), 'public/assets/dance/moves directory must exist');
 
-  const files = fs.readdirSync(movesDir).filter(f => f.endsWith('.json'));
+  const files = fs.readdirSync(movesDir).filter((f) => f.endsWith('.json'));
   assert.ok(files.length >= 10, `Expected at least 10 baked dance moves, found ${files.length}`);
 
   // Inspect a sample move
@@ -35,15 +35,37 @@ test('Discovered baked dance moves load accurately from public/assets/dance/move
   assert.ok(sample.frames[0].features.handR, 'Each frame must have handR features');
 });
 
-test('Dance game coach relies on FemaleCoachAvatar and does not hijack the routine with a static loop', () => {
+test('Dance game features dynamic 3D coach multi-move crossfader without crashing on #comparePose', () => {
   const danceCode = fs.readFileSync('public/src/games/dance.js', 'utf8');
 
-  // Verify customModel override was removed
-  assert.ok(!danceCode.includes('#loadCustomCoach'), '#loadCustomCoach must not exist');
-  assert.ok(!danceCode.includes('#loadFBXCoach'), '#loadFBXCoach must not exist');
-  assert.ok(!danceCode.includes('animMixer'), 'animMixer loop must not hijack coach kinematics');
+  // Verify safe target coordinate access in #comparePose
+  assert.ok(danceCode.includes('targetLx'), '#comparePose must safely access targetLx');
+  assert.ok(danceCode.includes('targetLy'), '#comparePose must safely access targetLy');
 
-  // Verify FemaleCoachAvatar is used and visible
-  assert.ok(danceCode.includes('new FemaleCoachAvatar'), 'FemaleCoachAvatar must be instantiated');
+  // Verify dynamic 3D multi-move crossfader
+  assert.ok(danceCode.includes('#load3DCoach'), 'dance.js must support #load3DCoach for 3D character presentation');
+  assert.ok(danceCode.includes('#playCoachDanceAnimation'), 'dance.js must switch animations per move via #playCoachDanceAnimation');
+  assert.ok(danceCode.includes('crossFadeTo'), 'dance.js must crossfade between distinct move clips');
   assert.ok(danceCode.includes('shuffleMoves()'), 'shuffleMoves method must be implemented');
+});
+
+test('Unified loop does not drain or discard player punch events before game receives them', () => {
+  const unifiedCode = fs.readFileSync('public/src/app/unified.js', 'utf8');
+
+  // Verify unified does not call p.motion.takeEvents() in the game loop pause check
+  assert.ok(
+    !unifiedCode.includes('const events = p.motion.takeEvents();'),
+    'unified.js must not consume player motion events in pause check'
+  );
+  assert.ok(
+    unifiedCode.includes("e.type === 'pauseToggle'"),
+    'unified.js must selectively inspect only pauseToggle events'
+  );
+});
+
+test('Avatar whole-body yaw incorporates noise deadzones and lockFacing support to prevent rotating to the right', () => {
+  const avatarCode = fs.readFileSync('public/src/engine/avatar.js', 'utf8');
+
+  assert.ok(avatarCode.includes('opts.lockFacing'), 'Avatar must support opts.lockFacing');
+  assert.ok(avatarCode.includes('deadH'), 'Avatar must apply deadzone to yaw calculations');
 });

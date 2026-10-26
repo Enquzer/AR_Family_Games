@@ -436,6 +436,7 @@ export class DanceGame extends BaseGame {
     this.message = this.currentMove.name;
     this.messageSub = `SHUFFLED · ${this.currentMove.tip}`;
     this.ctx.audio?.play?.('beat', { accent: true });
+    this.#playCoachDanceAnimation(this.currentMove);
   }
 
   #skipToNextMove() {
@@ -449,6 +450,7 @@ export class DanceGame extends BaseGame {
     this.message = this.currentMove.name;
     this.messageSub = `${this.bpm} BPM · ${this.currentMove.tip}`;
     this.ctx.audio?.play?.('go');
+    this.#playCoachDanceAnimation(this.currentMove);
   }
 
   buildWorld() {
@@ -474,6 +476,112 @@ export class DanceGame extends BaseGame {
 
     // 22 Arena Paparazzi Camera Flashes
     this.cameraFlashes = this.#createCameraFlashes(scene);
+
+    // Load 3D Rigged Mixamo Coach with Multi-Move Animation Crossfader
+    this.#load3DCoach(scene);
+  }
+
+  async #load3DCoach(scene) {
+    try {
+      const { FBXLoader } = await import('/vendor/three/FBXLoader.js');
+      const loader = new FBXLoader();
+      this.fbxLoader = loader;
+      this.danceClips = new Map();
+
+      // Priority list of base character models
+      const baseModels = [
+        'Dancing.fbx',
+        'Samba Dancing.fbx',
+        'Dancing Running Man.fbx',
+        'Hip Hop Dancing.fbx',
+        'Can Can.fbx',
+      ];
+
+      const tryLoadBase = (idx) => {
+        if (idx >= baseModels.length) return;
+        const file = baseModels[idx];
+        loader.load(
+          `/models/dance/${encodeURIComponent(file)}`,
+          (fbx) => {
+            if (!fbx) return;
+            const box = new THREE.Box3().setFromObject(fbx);
+            const size = new THREE.Vector3();
+            box.getSize(size);
+            const scale = size.y > 0 ? 2.05 / size.y : 0.0118;
+
+            this.coachMesh = fbx;
+            this.coachMesh.position.copy(this.coachHome);
+            this.coachMesh.scale.setScalar(scale);
+            this.coachMesh.rotation.y = 0;
+
+            this.coachMesh.traverse((child) => {
+              if (child.isMesh || child.isSkinnedMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+              }
+            });
+
+            scene.add(this.coachMesh);
+            this.coachMixer = new THREE.AnimationMixer(this.coachMesh);
+
+            if (fbx.animations?.[0]) {
+              this.danceClips.set(file, fbx.animations[0]);
+            }
+
+            // Hide procedural avatar now that 3D rigged character is live on stage
+            if (this.coach) this.coach.setVisible(false);
+
+            // Play the active move's dance
+            this.#playCoachDanceAnimation(this.currentMove);
+          },
+          undefined,
+          () => tryLoadBase(idx + 1)
+        );
+      };
+
+      tryLoadBase(0);
+    } catch {
+      // Fallback cleanly to FemaleCoachAvatar
+    }
+  }
+
+  #playCoachDanceAnimation(move) {
+    if (!move) return;
+
+    if (this.coachMixer && this.coachMesh) {
+      const fbxFile = move.sourceFbx || (move.name ? `${move.name}.fbx` : null);
+      if (fbxFile && this.danceClips.has(fbxFile)) {
+        this.#applyAnimationClip(this.danceClips.get(fbxFile), move.bpm);
+        return;
+      }
+
+      if (fbxFile && this.fbxLoader) {
+        this.fbxLoader.load(
+          `/models/dance/${encodeURIComponent(fbxFile)}`,
+          (fbx) => {
+            if (fbx?.animations?.[0]) {
+              this.danceClips.set(fbxFile, fbx.animations[0]);
+              if (this.currentMove === move) {
+                this.#applyAnimationClip(fbx.animations[0], move.bpm);
+              }
+            }
+          },
+          undefined,
+          () => {}
+        );
+      }
+    }
+  }
+
+  #applyAnimationClip(clip, moveBpm = 120) {
+    if (!this.coachMixer || !clip) return;
+    const nextAction = this.coachMixer.clipAction(clip);
+    nextAction.timeScale = clamp(this.bpm / (moveBpm || 120), 0.7, 1.6);
+    nextAction.reset().play();
+    if (this.currentAction && this.currentAction !== nextAction) {
+      this.currentAction.crossFadeTo(nextAction, 0.35, true);
+    }
+    this.currentAction = nextAction;
   }
 
   #createCameraFlashes(scene) {
@@ -538,6 +646,7 @@ export class DanceGame extends BaseGame {
     this.ctx.audio?.unlock?.();
     this.ctx.audio?.playMusicTrack?.({ loop: true, volume: 0.7 });
     this.ctx.audio.play('danceStart');
+    this.#playCoachDanceAnimation(this.currentMove);
   }
 
   /**
@@ -595,7 +704,14 @@ export class DanceGame extends BaseGame {
     }
 
     // Step continuous full-body dance kinematics for the Coach
-    this.#updateCoachKinematics(dt, localTime);
+    if (this.coachMixer && this.coachMesh) {
+      this.coachMixer.update(dt);
+      if (this.currentAction) {
+        this.currentAction.timeScale = clamp(this.bpm / (this.currentMove?.bpm || 120), 0.7, 1.6);
+      }
+    } else {
+      this.#updateCoachKinematics(dt, localTime);
+    }
 
     // Track real-time motion frames for players
     if (this.phase === 'dance') {
@@ -664,6 +780,7 @@ export class DanceGame extends BaseGame {
       this.currentMove = this.moves[moveIdx];
       this.bpm = this.currentMove.bpm;
       this.moveStartTime = localTime;
+      this.#playCoachDanceAnimation(this.currentMove);
     }
 
     // Play dynamic rhythmic percussion
@@ -981,23 +1098,50 @@ export class DanceGame extends BaseGame {
   #comparePose(state, move) {
     const hL = state.handL || { x: 0, y: 0 };
     const hR = state.handR || { x: 0, y: 0 };
-    const targetL = move.hands[0];
-    const targetR = move.hands[1];
 
-    const dL = Math.hypot(hL.x - targetL[0], hL.y - targetL[1]);
-    const dR = Math.hypot(hR.x - targetR[0], hR.y - targetR[1]);
+    // For baked mocap moves, derive target pose from the mid-point features frame
+    let targetL, targetR, targetLean, targetTwist, targetKneeL, targetKneeR;
+
+    if (move.useBakedFrames && move.frames?.length > 0) {
+      const midFrame = move.frames[Math.floor(move.frames.length / 2)];
+      const f = midFrame.features || {};
+      targetL = f.hands?.[0] || [f.handL?.x || 0, f.handL?.y || 0];
+      targetR = f.hands?.[1] || [f.handR?.x || 0, f.handR?.y || 0];
+      targetLean = f.lean || 0;
+      targetTwist = f.torsoTwist || 0;
+      targetKneeL = f.kneeL || 0;
+      targetKneeR = f.kneeR || 0;
+    } else if (move.hands) {
+      targetL = move.hands[0];
+      targetR = move.hands[1];
+      targetLean = move.lean || 0;
+      targetTwist = move.twist || 0;
+      targetKneeL = move.kneeL || 0;
+      targetKneeR = move.kneeR || 0;
+    } else {
+      // No pose data at all — give a neutral pass score
+      return 0.5;
+    }
+
+    const targetLx = targetL?.[0] ?? targetL?.x ?? 0;
+    const targetLy = targetL?.[1] ?? targetL?.y ?? 0;
+    const targetRx = targetR?.[0] ?? targetR?.x ?? 0;
+    const targetRy = targetR?.[1] ?? targetR?.y ?? 0;
+
+    const dL = Math.hypot(hL.x - targetLx, hL.y - targetLy);
+    const dR = Math.hypot(hR.x - targetRx, hR.y - targetRy);
     const handScore = 1 - clamp((dL + dR) / 2 / 1.75, 0, 1);
 
-    const leanScore = 1 - clamp(Math.abs((state.lean || 0) - (move.lean || 0)) / 1.55, 0, 1);
+    const leanScore = 1 - clamp(Math.abs((state.lean || 0) - targetLean) / 1.55, 0, 1);
     const kneeScore =
       1 -
       clamp(
-        (Math.abs((state.kneeLiftL || 0) - (move.kneeL || 0)) +
-          Math.abs((state.kneeLiftR || 0) - (move.kneeR || 0))) / 2,
+        (Math.abs((state.kneeLiftL || 0) - targetKneeL) +
+          Math.abs((state.kneeLiftR || 0) - targetKneeR)) / 2,
         0,
         1
       );
-    const twistScore = 1 - clamp(Math.abs((state.torsoTwist || 0) - (move.twist || 0)) / 1.8, 0, 1);
+    const twistScore = 1 - clamp(Math.abs((state.torsoTwist || 0) - targetTwist) / 1.8, 0, 1);
 
     return clamp(handScore * 0.55 + leanScore * 0.15 + kneeScore * 0.2 + twistScore * 0.1, 0, 1);
   }
@@ -1134,6 +1278,12 @@ export class DanceGame extends BaseGame {
 
   dispose() {
     window.removeEventListener('keydown', this.onKey);
+    if (this.coachMesh) {
+      this.coachMesh.removeFromParent();
+      this.coachMesh = null;
+    }
+    this.coachMixer = null;
+    this.danceClips?.clear();
     if (this.coach) {
       this.coach.dispose();
       this.coach = null;

@@ -1398,12 +1398,11 @@ function frame(now) {
     if (game) {
       // Check pause gesture || (parallel arms overhead) across active players
       for (const p of activeJoined) {
-        if (p.motion) {
-          const events = p.motion.takeEvents();
-          for (const ev of events) {
-            if (ev.type === 'pauseToggle') {
-              toggleGamePause();
-            }
+        if (p.motion?.state?.events?.length) {
+          const pauseIdx = p.motion.state.events.findIndex((e) => e.type === 'pauseToggle');
+          if (pauseIdx !== -1) {
+            p.motion.state.events.splice(pauseIdx, 1);
+            toggleGamePause();
           }
         }
       }
@@ -1421,7 +1420,10 @@ function frame(now) {
       const effectiveDt = (isGamePaused || dominantHandCalibrating) ? 0 : dt;
       for (const p of activeJoined) {
         p.avatar.aspect = p.aspect;
-        p.avatar.update(p.lm, p.stage, effectiveDt, { active: p.active && now - p.lastSeen < 900 });
+        p.avatar.update(p.lm, p.stage, effectiveDt, {
+          active: p.active && now - p.lastSeen < 900,
+          lockFacing: game?.id === 'boxing',
+        });
       }
       if (effectiveDt > 0) {
         game.update(effectiveDt);

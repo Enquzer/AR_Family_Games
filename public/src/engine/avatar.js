@@ -645,7 +645,7 @@ export class Avatar {
     this.#setIdleTargets(now);
     this.poseYawTarget = 0;
     if (opts.poseTargets) this.#applyPoseTargets(opts.poseTargets);
-    if (active) this.#poseFromLandmarks(lm);
+    if (active) this.#poseFromLandmarks(lm, opts);
 
     const lambda = active ? 20 : opts.poseLambda || 6;
     for (const k of Object.keys(this.joints)) {
@@ -686,7 +686,7 @@ export class Avatar {
     }
   }
 
-  #poseFromLandmarks(lm) {
+  #poseFromLandmarks(lm, opts = {}) {
     const aspect = this.aspect || 16 / 9;
     const hipC = mid(lm[LM.L_HIP], lm[LM.R_HIP]);
     const ankC = mid(lm[LM.L_ANKLE], lm[LM.R_ANKLE]);
@@ -744,10 +744,16 @@ export class Avatar {
     const dzH = this.target.hipR.z - this.target.hipL.z;
     const shoulderSpan = Math.hypot(dxS, dzS);
     const hipSpan = Math.hypot(dxH, dzH);
-    if (shoulderSpan > 0.1 && hipSpan > 0.055) {
+    if (shoulderSpan > 0.1 && hipSpan > 0.055 && !opts.lockFacing) {
       const yawS = Math.atan2(-dzS, dxS);
       const yawH = Math.atan2(-dzH, dxH);
-      this.poseYawTarget = clamp(yawS * 0.58 + yawH * 0.42, -1.2, 1.2);
+      // Deadzone of ~0.08 rad filters out camera depth sensor asymmetry when standing straight.
+      // Weight hips over shoulders so punching forward does not rotate the whole avatar sideways.
+      const deadS = Math.abs(yawS) > 0.12 ? yawS : 0;
+      const deadH = Math.abs(yawH) > 0.08 ? yawH : 0;
+      this.poseYawTarget = clamp(deadH * 0.72 + deadS * 0.28, -0.85, 0.85);
+    } else if (opts.lockFacing) {
+      this.poseYawTarget = 0;
     }
 
     if (this.seated) {

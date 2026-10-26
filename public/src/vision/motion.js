@@ -367,10 +367,10 @@ export class MotionTracker {
     const tryPunch = (hand, score, ext, extVel, fwdSpeed, lateralSpeed, wristY, speed, accel, metricSpd) => {
       const candidate = this.punchCandidate[hand];
       const handRaised = wristY < hip.y + bodyH * 0.04 && wristY > sh.y - bodyH * 0.62;
-      const reachOK = ext > minArmExt || (lateralSpeed > 1.7 && ext > minArmExt * 0.85);
-      const extending = extVel > 0.15 || fwdSpeed > 0.40 || lateralSpeed > 1.8;
-      const metricPass = metricSpd > 0 ? metricSpd > minForwardMps * 0.6 : true;
-      const strongEnough = speed > 1.1 && score > 1.8 && metricPass;
+      const reachOK = ext > minArmExt || (lateralSpeed > 1.6 && ext > minArmExt * 0.8);
+      const extending = extVel > 0.12 || fwdSpeed > 0.35 || lateralSpeed > 1.6;
+      const metricPass = metricSpd > 0 ? metricSpd > minForwardMps * 0.5 : true;
+      const strongEnough = (speed > 0.95 && score > 1.5 && metricPass) || extVel > 0.4;
 
       const qualified =
         now >= this.waveLockUntil &&
@@ -392,8 +392,9 @@ export class MotionTracker {
       candidate.integral += score;
       candidate.best = { score, ext, fwdSpeed, speed, accel };
 
-      // Integrate burst over at least 2 consecutive frames
-      if (candidate.frames < 2) return;
+      // Integrate burst: fire immediately on frame 1 for crisp punch thrusts, or 2 frames for building momentum
+      const immediate = score > 1.9 || extVel > 0.35 || (speed > 1.3 && ext > 0.8);
+      if (candidate.frames < 2 && !immediate) return;
       if (now - this.punchCooldown[hand] < punchCooldownMs) return;
       if (now - this.lastPunchAt < 80) return;
 
