@@ -20,11 +20,11 @@ export const GAME_CATALOG = [
   },
   {
     id: 'sprint',
-    title: '100m Sprint',
+    title: '200m Sprint',
     icon: '🏃',
     accent: '#22d3ee',
     players: '1–4',
-    tagline: 'Olympic 100m sprint · 4 lanes, railcam, finish line tape & camera flashes.',
+    tagline: 'Olympic 200m sprint · 4 lanes, railcam, finish line tape & camera flashes.',
     how: 'Run on the spot as fast as you can · high knees & arm pumping · 3 heats',
   },
   {

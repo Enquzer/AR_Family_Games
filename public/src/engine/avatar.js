@@ -700,7 +700,7 @@ export class Avatar {
     const rigH = Number.isFinite(expected) ? lerp(bodyH, expected, 0.35) : bodyH;
     const scale = clamp(1.45 / Math.max(rigH, 0.04), 1.2, 5.5);
     const mirror = -1;
-    const hipY = clamp((hipC.y - ankC.y) * scale, 0.62, 1.1);
+    const hipY = clamp((ankC.y - hipC.y) * scale, 0.62, 1.1);
     const P = (i) => {
       const p = lm[i];
       return new THREE.Vector3(

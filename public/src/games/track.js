@@ -56,9 +56,9 @@ export class TrackGame extends BaseGame {
   constructor(ctx, options = {}) {
     super(ctx, options);
     this.id = options.id || 'sprint';
-    this.title = options.title || '100m SPRINT';
+    this.title = options.title || '200m SPRINT';
     this.subtitle = options.subtitle || 'Olympic Track & Field · 3 Heats';
-    this.distance = options.distance || 60;
+    this.distance = options.distance || 200;
     this.heats = options.heats ?? 3;
     this.hurdleXs = options.hurdles || null;
     this.maxSpeed = options.maxSpeed || (this.hurdleXs ? 9.8 : 10.4);
@@ -665,24 +665,27 @@ export class TrackGame extends BaseGame {
           this.ctx.audio.play('step');
         }
 
-        // --- TWO-FOOT VERTICAL JUMP TRAJECTORY PHYSICS ---
-        const jumpInput = Math.max(Number(c.motion.jump) || 0, s.jumpWindow > 0 ? 0.8 : 0);
-        if (jumpInput > 0.2 && !s.isJumping) {
-          s.isJumping = true;
-          s.jumpVy = 4.4 * clamp(jumpInput * 1.35, 0.85, 1.35);
-          s.jumpY = 0.05;
-        }
-
-        if (s.isJumping) {
-          s.jumpVy -= 11.5 * dt;
-          s.jumpY += s.jumpVy * dt;
-          if (s.jumpY <= 0) {
-            s.jumpY = 0;
-            s.jumpVy = 0;
-            s.isJumping = false;
+        // --- TWO-FOOT VERTICAL JUMP TRAJECTORY PHYSICS (Hurdles Only) ---
+        let effectiveJumpY = 0;
+        if (this.hurdleXs) {
+          const jumpInput = Math.max(Number(c.motion.jump) || 0, s.jumpWindow > 0 ? 0.8 : 0);
+          if (jumpInput > 0.45 && !s.isJumping) {
+            s.isJumping = true;
+            s.jumpVy = 4.4 * clamp(jumpInput * 1.35, 0.85, 1.35);
+            s.jumpY = 0.05;
           }
+
+          if (s.isJumping) {
+            s.jumpVy -= 11.5 * dt;
+            s.jumpY += s.jumpVy * dt;
+            if (s.jumpY <= 0) {
+              s.jumpY = 0;
+              s.jumpVy = 0;
+              s.isJumping = false;
+            }
+          }
+          effectiveJumpY = s.jumpY;
         }
-        const effectiveJumpY = Math.max(s.jumpY, jumpInput * 0.9);
 
         // --- HURDLE PASSING & KNOCK-DOWN COLLISION ---
         if (this.hurdleXs && !s.finished) {
@@ -1114,7 +1117,7 @@ export class TrackGame extends BaseGame {
       subtitle:
         this.phase === 'podium' || this.phase === 'final'
           ? 'Olympic Victory Ceremony · Series Complete'
-          : `Heat ${this.heat} of ${this.heats} · ${this.hurdleXs ? '110m Hurdles' : '100m Sprint'}`,
+          : `Heat ${this.heat} of ${this.heats} · ${this.hurdleXs ? '110m Hurdles' : '200m Sprint'}`,
       phase: this.phase,
       timer,
       message: this.message,

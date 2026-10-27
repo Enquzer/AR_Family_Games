@@ -141,3 +141,25 @@ test('Finish line tape snaps upon first crossing and calculates Olympic series p
   assert.equal(standings[0][0], 'human');
   assert.equal(standings[0][1], 26);
 });
+
+test('Sprint configuration has 200m track distance and grounds runners to track surface', async () => {
+  const fs = await import('fs');
+  const trackCode = fs.readFileSync('public/src/games/track.js', 'utf8');
+  const indexCode = fs.readFileSync('public/src/games/index.js', 'utf8');
+  const catalogCode = fs.readFileSync('public/src/games/catalog.js', 'utf8');
+
+  // Verify distance is 200 meters across configs
+  assert.ok(indexCode.includes('distance: 200'), 'SprintGame in index.js must set distance: 200');
+  assert.ok(trackCode.includes('this.distance = options.distance || 200;'), 'TrackGame must default distance to 200');
+  assert.ok(catalogCode.includes("'200m Sprint'"), 'catalog.js must advertise 200m Sprint');
+
+  // Verify jump physics is isolated to hurdles only, grounding runners in flat sprint
+  assert.ok(
+    trackCode.includes('if (this.hurdleXs) {'),
+    'Jump trajectory physics must only activate when hurdles are present'
+  );
+  assert.ok(
+    !trackCode.includes('const effectiveJumpY = Math.max(s.jumpY, jumpInput * 0.9);'),
+    'Must not elevate runner with jumpInput * 0.9'
+  );
+});

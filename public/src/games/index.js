@@ -11,7 +11,7 @@ import { ArcheryGame } from './archery.js';
 
 export class SprintGame extends TrackGame {
   constructor(ctx, options = {}) {
-    super(ctx, { ...options, id: 'sprint', title: '100m SPRINT', subtitle: 'Olympic Track & Field · 3 Heats', distance: 60, heats: 3, maxSpeed: 10.4 });
+    super(ctx, { ...options, id: 'sprint', title: '200m SPRINT', subtitle: 'Olympic Track & Field · 3 Heats', distance: 200, heats: 3, maxSpeed: 10.4 });
   }
 }
 
