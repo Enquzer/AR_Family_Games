@@ -80,7 +80,8 @@ export class TennisGame extends BaseGame {
 
   buildWorld() {
     this.env = buildCourt();
-    const scene = this.env.scene;
+    this.scene = this.env.scene;
+    const scene = this.scene;
 
     // Felt Tennis Ball with subtle optic yellow glow
     this.ballMesh = new THREE.Mesh(

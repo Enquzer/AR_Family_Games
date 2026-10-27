@@ -455,7 +455,8 @@ export class DanceGame extends BaseGame {
 
   buildWorld() {
     this.env = buildDanceClub();
-    const scene = this.env.scene;
+    this.scene = this.env.scene;
+    const scene = this.scene;
 
     // The Female Coach stands tall and commanding front-and-center on the illuminated elevated stage
     this.coach = new FemaleCoachAvatar({ name: 'CHAMPION COACH', color: '#f472b6' });

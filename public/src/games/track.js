@@ -113,7 +113,8 @@ export class TrackGame extends BaseGame {
 
   buildWorld() {
     this.env = buildTrack({ finish: this.distance, hurdles: null, laneCount: LANE_COUNT });
-    const scene = this.env.scene;
+    this.scene = this.env.scene;
+    const scene = this.scene;
 
     // Finish line ground checkerboard plane
     const lineTex = this.#checkerTexture();

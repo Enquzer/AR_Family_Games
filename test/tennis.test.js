@@ -90,3 +90,18 @@ test('Tennis spatial racket hit collision correctly discriminates sweet-spot con
   // Missed contact: ball passed 1.8m away
   assert.equal(testCollision({ x: -8.2, y: 1.45, z: 3.2 }), false);
 });
+
+test('TennisGame initializes this.scene before building 3D racket and stadium effects', async () => {
+  const fs = await import('fs');
+  const tennisCode = fs.readFileSync('public/src/games/tennis.js', 'utf8');
+
+  // Verify this.scene is assigned to this.env.scene right after building court
+  assert.ok(
+    tennisCode.includes('this.scene = this.env.scene;'),
+    'tennis.js must assign this.scene = this.env.scene in buildWorld()'
+  );
+  assert.ok(
+    tennisCode.includes('#build3DRacket()'),
+    'tennis.js must build 3D racket'
+  );
+});
