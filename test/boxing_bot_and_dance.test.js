@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
+import { MotionTracker } from '../public/src/vision/motion.js';
+import { LM } from '../public/src/shared/pose.js';
 
 test('Boxing bot has dedicated boxing gloves, no orphan rigged models, and responsive guard/hit kinematics', () => {
   const boxingCode = fs.readFileSync('public/src/games/boxing.js', 'utf8');
@@ -101,4 +103,34 @@ test('Hand menu suppresses cursor and dwell ring during active gameplay and only
       `${name} must not drain motion events before games receive them`
     );
   }
+});
+
+test('MotionTracker suppresses phantom punches when user is stationary in guard or stance with camera noise', () => {
+  const mt = new MotionTracker();
+  let time = 1000;
+  let punches = 0;
+
+  // Simulate 100 frames (~3 seconds) of a player standing in an angled boxing stance with hands in guard
+  for (let i = 0; i < 100; i++) {
+    time += 33;
+    const noise = (i % 2 === 0 ? 0.006 : -0.006);
+    const lm = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, z: 0, visibility: 0.95 }));
+    lm[LM.NOSE] = { x: 0.48, y: 0.25, z: 0, visibility: 0.95 };
+    lm[LM.L_SHOULDER] = { x: 0.46, y: 0.35, z: -0.1, visibility: 0.95 };
+    lm[LM.R_SHOULDER] = { x: 0.54, y: 0.35, z: 0.1, visibility: 0.95 };
+    lm[LM.L_HIP] = { x: 0.47, y: 0.55, z: -0.08, visibility: 0.95 };
+    lm[LM.R_HIP] = { x: 0.53, y: 0.55, z: 0.08, visibility: 0.95 };
+    // Lead hand extended forward at chest height in ready jab stance:
+    lm[LM.L_WRIST] = { x: 0.38 + noise, y: 0.38 + noise, z: -0.25, visibility: 0.95 };
+    // Rear hand at chin:
+    lm[LM.R_WRIST] = { x: 0.50, y: 0.32, z: 0, visibility: 0.95 };
+    lm[LM.L_ANKLE] = { x: 0.45, y: 0.9, z: 0, visibility: 0.9 };
+    lm[LM.R_ANKLE] = { x: 0.55, y: 0.9, z: 0, visibility: 0.9 };
+
+    mt.update(lm, 16 / 9, time);
+    const evs = mt.takeEvents();
+    punches += evs.filter((e) => e.type === 'punch').length;
+  }
+
+  assert.equal(punches, 0, 'Must not emit any phantom punches when player is stationary in stance with camera noise');
 });

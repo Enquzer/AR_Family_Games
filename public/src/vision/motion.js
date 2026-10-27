@@ -201,7 +201,11 @@ export class MotionTracker {
     const sh = mid(shL, shR);
     const hip = mid(hipL, hipR);
     const ankle = mid(anL, anR);
-    const shoulderW = Math.max(dist2(shL.x, shL.y, shR.x, shR.y), 0.03);
+    const rawShoulderW = Math.max(dist2(shL.x, shL.y, shR.x, shR.y), 0.03);
+    const torsoH = Math.max(dist2(sh.x, sh.y, hip.x, hip.y), 0.08);
+    // In an angled boxing stance, 2D shoulder width collapses.
+    // Anchor shoulderW with torso height so speeds and extensions don't artificially blow up into infinity.
+    const shoulderW = Math.max(rawShoulderW, torsoH * 0.72, 0.12);
     const bodyH = Math.max(dist2(sh.x, sh.y, ankle.x, ankle.y), 0.08);
     const headY = Math.min(nose.y, (shL.y + shR.y) / 2);
     const vis = (lm[LM.L_SHOULDER].visibility + lm[LM.R_SHOULDER].visibility + lm[LM.L_HIP].visibility + lm[LM.R_HIP].visibility) / 4;
@@ -347,30 +351,30 @@ export class MotionTracker {
     /* ---------------- punches & swings ---------------- */
     const handsUp = wrL.y < hip.y && wrR.y < hip.y;
     const torsoDrive = Math.abs(s.torsoTwist) * 0.55 + Math.abs(s.lean) * 0.2;
-    const punchScoreL =
-      Math.max(0, handSpeedL - 0.55) * 0.9 +
-      Math.max(0, extVelL) * 1.15 +
-      forwardSpeedL * 0.65 +
-      Math.max(0, extL - 0.85) * 1.4 +
-      torsoDrive;
-    const punchScoreR =
-      Math.max(0, handSpeedR - 0.55) * 0.9 +
-      Math.max(0, extVelR) * 1.15 +
-      forwardSpeedR * 0.65 +
-      Math.max(0, extR - 0.85) * 1.4 +
-      torsoDrive;
+
+    // Movement gating: only generate punch scores if there is actual physical hand/arm velocity.
+    // Torso twist and extension alone do not trigger punches when hands are stationary in guard!
+    const activePunchMotionL = Math.max(0, handSpeedL - 0.7) * 1.1 + Math.max(0, extVelL - 0.25) * 1.2 + forwardSpeedL * 0.8;
+    const activePunchMotionR = Math.max(0, handSpeedR - 0.7) * 1.1 + Math.max(0, extVelR - 0.25) * 1.2 + forwardSpeedR * 0.8;
+
+    const punchScoreL = activePunchMotionL > 0.45
+      ? activePunchMotionL + Math.max(0, extL - 0.9) * 0.75 + torsoDrive * 0.5
+      : 0;
+    const punchScoreR = activePunchMotionR > 0.45
+      ? activePunchMotionR + Math.max(0, extR - 0.9) * 0.75 + torsoDrive * 0.5
+      : 0;
 
     const minForwardMps = CONFIG.motion?.punch?.minForwardSpeedMps || 1.15;
     const minArmExt = CONFIG.motion?.punch?.minArmExtension || 0.75;
     const punchCooldownMs = CONFIG.motion?.punch?.cooldownMs || 220;
 
-    const tryPunch = (hand, score, ext, extVel, fwdSpeed, lateralSpeed, wristY, speed, accel, metricSpd) => {
+    const tryPunch = (hand, score, ext, extVel, fwdSpeed, lateralSpeed, wristY, speed, accel, metricSpd, wr) => {
       const candidate = this.punchCandidate[hand];
       const handRaised = wristY < hip.y + bodyH * 0.04 && wristY > sh.y - bodyH * 0.62;
       const reachOK = ext > minArmExt || (lateralSpeed > 1.6 && ext > minArmExt * 0.8);
-      const extending = extVel > 0.12 || fwdSpeed > 0.35 || lateralSpeed > 1.6;
-      const metricPass = metricSpd > 0 ? metricSpd > minForwardMps * 0.5 : true;
-      const strongEnough = (speed > 0.95 && score > 1.5 && metricPass) || extVel > 0.4;
+      const extending = (extVel > 0.25 || fwdSpeed > 0.5 || (lateralSpeed > 1.8 && ext > 0.85)) && extVel > -0.15;
+      const metricPass = metricSpd > 0 ? metricSpd > minForwardMps * 0.45 : true;
+      const fastEnough = (speed > 1.2 && score > 1.35 && metricPass) || (metricSpd > 1.0 && score > 1.1);
 
       const qualified =
         now >= this.waveLockUntil &&
@@ -379,22 +383,37 @@ export class MotionTracker {
         handRaised &&
         reachOK &&
         extending &&
-        strongEnough;
+        fastEnough;
 
       if (!qualified) {
-        candidate.frames = Math.max(0, candidate.frames - 1);
-        candidate.integral = Math.max(0, candidate.integral - score * 0.5);
+        candidate.frames = 0;
+        candidate.integral = 0;
         candidate.best = null;
+        candidate.startExt = ext;
+        candidate.startPos = { x: wr.x, y: wr.y };
         return;
+      }
+
+      if (candidate.frames === 0) {
+        candidate.startExt = ext;
+        candidate.startPos = { x: wr.x, y: wr.y };
       }
 
       candidate.frames++;
       candidate.integral += score;
       candidate.best = { score, ext, fwdSpeed, speed, accel };
 
-      // Integrate burst: fire immediately on frame 1 for crisp punch thrusts, or 2 frames for building momentum
-      const immediate = score > 1.9 || extVel > 0.35 || (speed > 1.3 && ext > 0.8);
-      if (candidate.frames < 2 && !immediate) return;
+      // Sustained strike momentum: require at least 2 consecutive qualifying frames.
+      // Single-frame jitter spikes (which reverse or stall on frame 2) are cleanly rejected!
+      if (candidate.frames < 2) return;
+
+      // Net displacement / extension delta check:
+      // Verify that the hand has actually traveled outward from where the strike began
+      const netTravel = dist2(wr.x, wr.y, candidate.startPos?.x ?? wr.x, candidate.startPos?.y ?? wr.y) / shoulderW;
+      const deltaExt = ext - (candidate.startExt ?? ext);
+      const movedSignificantly = netTravel > 0.16 || deltaExt > 0.12 || metricSpd > 0.7 || fwdSpeed > 0.7;
+      if (!movedSignificantly) return;
+
       if (now - this.punchCooldown[hand] < punchCooldownMs) return;
       if (now - this.lastPunchAt < 80) return;
 
@@ -402,9 +421,10 @@ export class MotionTracker {
       this.lastPunchAt = now;
       candidate.frames = 0;
       candidate.integral = 0;
+      candidate.best = null;
 
-      const quality = clamp((score - 1.6) / 3.0, 0, 1);
-      const power = clamp(0.35 + quality * 1.0, 0.35, 1.4);
+      const quality = clamp((score - 1.4) / 3.0, 0, 1);
+      const power = clamp(0.40 + quality * 1.0, 0.40, 1.4);
       const momentum = clamp(
         quality * (0.55 + Math.abs(s.torsoTwist) * 0.35 + Math.min(fwdSpeed, 2.5) * 0.12) +
           Math.min(Math.abs(accel) * 0.012, 0.18),
@@ -441,8 +461,8 @@ export class MotionTracker {
       else s.punchR = now;
     };
 
-    tryPunch('L', punchScoreL, extL, extVelL, forwardSpeedL, lateralL, wrL.y, handSpeedL, accelL, metricSpeedL);
-    tryPunch('R', punchScoreR, extR, extVelR, forwardSpeedR, lateralR, wrR.y, handSpeedR, accelR, metricSpeedR);
+    tryPunch('L', punchScoreL, extL, extVelL, forwardSpeedL, lateralL, wrL.y, handSpeedL, accelL, metricSpeedL, wrL);
+    tryPunch('R', punchScoreR, extR, extVelR, forwardSpeedR, lateralR, wrR.y, handSpeedR, accelR, metricSpeedR, wrR);
     this.handPrev.L = { ext: extL, z: wrL.z };
     this.handPrev.R = { ext: extR, z: wrR.z };
     this.prevHandSpeed.L = handSpeedL;
