@@ -69,3 +69,36 @@ test('Avatar whole-body yaw incorporates noise deadzones and lockFacing support 
   assert.ok(avatarCode.includes('opts.lockFacing'), 'Avatar must support opts.lockFacing');
   assert.ok(avatarCode.includes('deadH'), 'Avatar must apply deadzone to yaw calculations');
 });
+
+test('Hand menu suppresses cursor and dwell ring during active gameplay and only reveals it during pause', () => {
+  const unifiedCode = fs.readFileSync('public/src/app/unified.js', 'utf8');
+  const displayCode = fs.readFileSync('public/src/app/display.js', 'utf8');
+
+  for (const [name, code] of [['unified.js', unifiedCode], ['display.js', displayCode]]) {
+    // 1. Must hide cursor during active gameplay
+    assert.ok(
+      code.includes('if (game && !isGamePaused && !pendingPlayer2Join)'),
+      `${name} must early-return and hide cursor during active gameplay`
+    );
+    assert.ok(
+      code.includes('cursorEl.hidden = true;'),
+      `${name} must hide cursorEl`
+    );
+
+    // 2. Must only expose pause targets when paused
+    assert.ok(
+      code.includes('btn-pause-resume'),
+      `${name} must register btn-pause-resume when game is paused`
+    );
+    assert.ok(
+      code.includes('btn-pause-home'),
+      `${name} must register btn-pause-home when game is paused`
+    );
+
+    // 3. Must not drain motion events in frame loop
+    assert.ok(
+      !code.includes('const events = p.motion.takeEvents();'),
+      `${name} must not drain motion events before games receive them`
+    );
+  }
+});

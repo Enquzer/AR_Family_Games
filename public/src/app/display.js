@@ -841,14 +841,36 @@ function updateHandMenu(dt, now) {
   const cursorEl = $('#kinect-cursor');
   if (!cursorEl) return;
 
+  // During active gameplay, hide the hand cursor and loading dwell ring completely
+  // so boxing punches, swings, and dance gestures never trigger dwell-click or close the game!
+  // The cursor is ONLY active when paused or on the home menu.
+  if (game && !isGamePaused && !pendingPlayer2Join) {
+    if (cursorState.hoveredItem) {
+      cursorState.hoveredItem.el.classList.remove('kinect-hover');
+      cursorState.hoveredItem = null;
+    }
+    cursorState.dwellTime = 0;
+    cursorState.active = false;
+    cursorEl.hidden = true;
+    return;
+  }
+
   // Build target list depending on whether a game is active
   const targets = [];
-  if (game) {
-    const homeBtn = $('#gesture-home-btn');
-    if (homeBtn && !$('#hud').hidden) {
-      targets.push({ el: homeBtn, type: 'home', dwell: 1.25, label: 'HOLD FOR HOME' });
+  if (game && isGamePaused) {
+    const resumeBtn = $('#btn-pause-resume');
+    if (resumeBtn) {
+      targets.push({ el: resumeBtn, type: 'pause-resume', dwell: 1.2, label: 'HOLD TO RESUME' });
     }
-  } else {
+    const handBtn = $('#btn-pause-hand');
+    if (handBtn) {
+      targets.push({ el: handBtn, type: 'pause-hand', dwell: 1.2, label: 'HOLD TO SWITCH' });
+    }
+    const homeBtn = $('#btn-pause-home');
+    if (homeBtn) {
+      targets.push({ el: homeBtn, type: 'pause-home', dwell: 1.35, label: 'HOLD FOR HOME' });
+    }
+  } else if (!game) {
     for (const card of document.querySelectorAll('.attract-card')) {
       targets.push({
         el: card,
@@ -1002,7 +1024,7 @@ function updateHandMenu(dt, now) {
       cursorState.selecting = true;
       hitItem.el.classList.add('kinect-selected');
 
-      if (hitItem.type === 'home') {
+      if (hitItem.type === 'home' || hitItem.type === 'pause-home') {
         audio.play('select');
         net.send({ t: 'command', action: 'stop' });
         setTimeout(() => {
@@ -1011,7 +1033,30 @@ function updateHandMenu(dt, now) {
           cursorState.hoveredItem = null;
           cursorState.dwellTime = 0;
           cursorState.selecting = false;
+          if (isGamePaused) toggleGamePause(false);
           stopGame(true);
+        }, 200);
+      } else if (hitItem.type === 'pause-resume') {
+        audio.play('select');
+        setTimeout(() => {
+          hitItem.el.classList.remove('kinect-hover', 'kinect-selected');
+          cursorEl.hidden = true;
+          cursorState.hoveredItem = null;
+          cursorState.dwellTime = 0;
+          cursorState.selecting = false;
+          toggleGamePause(false);
+        }, 200);
+      } else if (hitItem.type === 'pause-hand') {
+        audio.play('select');
+        setTimeout(() => {
+          hitItem.el.classList.remove('kinect-hover', 'kinect-selected');
+          cursorEl.hidden = true;
+          cursorState.hoveredItem = null;
+          cursorState.dwellTime = 0;
+          cursorState.selecting = false;
+          toggleGamePause(false);
+          const mainP = players.get(playerOrder[0]);
+          if (mainP) promptDominantHand(mainP, game?.id);
         }, 200);
       } else if (hitItem.type === 'exit-sys') {
         setTimeout(() => {
@@ -1188,12 +1233,11 @@ function frame(now) {
     if (game) {
       // Check pause gesture || (parallel arms overhead) across active players
       for (const p of activeList) {
-        if (p.motion) {
-          const events = p.motion.takeEvents();
-          for (const ev of events) {
-            if (ev.type === 'pauseToggle') {
-              toggleGamePause();
-            }
+        if (p.motion?.state?.events?.length) {
+          const pauseIdx = p.motion.state.events.findIndex((e) => e.type === 'pauseToggle');
+          if (pauseIdx !== -1) {
+            p.motion.state.events.splice(pauseIdx, 1);
+            toggleGamePause();
           }
         }
       }
