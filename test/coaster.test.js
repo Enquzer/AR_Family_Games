@@ -130,3 +130,20 @@ test('Slow chain-lift hill ascends to summit before triggering gravity mega-drop
   const dropHeight = pSummit.y - pDropBottom.y;
   assert.ok(dropHeight > 24.0, `Mega drop must plunge > 24 meters, plunged ${dropHeight.toFixed(1)}m`);
 });
+
+test('Coaster tangent vectors and curve calculations are defined across chain-lift and high-speed sections', () => {
+  // Test across all track fractions from chain-lift (u < 0.22) to high-speed run
+  for (let step = 0; step <= 100; step++) {
+    const uu = step / 100;
+    const pCurrent = curve.getPointAt(uu);
+    const tCurrent = curve.getTangentAt(uu).normalize();
+
+    assert.ok(pCurrent && typeof pCurrent.x === 'number', `Point at u=${uu} must be valid Vector3`);
+    assert.ok(tCurrent && typeof tCurrent.x === 'number', `Tangent at u=${uu} must be valid Vector3`);
+
+    const rightVec = new Vector3().crossVectors(tCurrent || UP, UP).normalize();
+    assert.ok(rightVec && typeof rightVec.x === 'number', `Right vector at u=${uu} must be valid Vector3`);
+    assert.ok(!Number.isNaN(rightVec.length()), `Right vector length at u=${uu} must not be NaN`);
+  }
+});
+

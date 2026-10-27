@@ -163,6 +163,7 @@ export class CoasterGame extends BaseGame {
 
   buildWorld() {
     this.env = buildCoasterWorld();
+    this.scene = this.env.scene;
     this.curve = this.env.curve;
     this.trackLength = this.curve.getLength();
     this.cart = makeCart();
@@ -419,6 +420,8 @@ export class CoasterGame extends BaseGame {
       // 4. Speed Profile & Slow Start Chain-Lift Hill
       const uu = this.u % 1;
       const isChainLift = uu < 0.22 && Math.floor(this.u) === 0;
+      const pCurrent = this.curve.getPointAt(uu);
+      const tCurrent = this.curve.getTangentAt(uu).normalize();
 
       if (isChainLift) {
         // Slow mechanical chain-lift hill climbing up to 34m summit
@@ -433,8 +436,6 @@ export class CoasterGame extends BaseGame {
         }
       } else {
         // High-Speed Theme-Park Coaster Run (16 - 26 m/s) with gravity acceleration
-        const pCurrent = this.curve.getPointAt(uu);
-        const tCurrent = this.curve.getTangentAt(uu).normalize();
         // Gravity acceleration: slope down increases speed, slope up slows down
         const slopeGain = -tCurrent.y * 12.0;
         this.targetSpeed = clamp(17.5 + slopeGain + (boost ? 6.5 : 0), 11.0, 27.5);
