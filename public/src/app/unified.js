@@ -1456,12 +1456,15 @@ function frame(now) {
       }
 
       const effectiveDt = (isGamePaused || dominantHandCalibrating) ? 0 : dt;
+      const isTrackGame = game?.id === 'sprint' || game?.id === 'hurdles';
       for (const p of activeJoined) {
         p.avatar.aspect = p.aspect;
-        p.avatar.update(p.lm, p.stage, effectiveDt, {
-          active: p.active && now - p.lastSeen < 900,
-          lockFacing: game?.id === 'boxing',
-        });
+        if (!isTrackGame) {
+          p.avatar.update(p.lm, p.stage, effectiveDt, {
+            active: p.active && now - p.lastSeen < 900,
+            lockFacing: game?.id === 'boxing',
+          });
+        }
       }
       if (effectiveDt > 0) {
         game.update(effectiveDt);

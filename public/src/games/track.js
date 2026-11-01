@@ -653,12 +653,16 @@ export class TrackGame extends BaseGame {
         if (!frozen && !s.finished && s.falseStart <= 0) {
           const trackedRun = Number.isFinite(c.motion.run) ? c.motion.run : 0;
           const cadence = Number(c.motion.cadence) || 0;
-          const limbRun = (Number(c.motion.legDrive) || 0) * 0.55 + (Number(c.motion.armDrive) || 0) * 0.25;
+          const legDrive = Number(c.motion.legDrive) || 0;
+          const armDrive = Number(c.motion.armDrive) || 0;
+          const legVel = Number(c.motion.state?.legVelocity) || 0;
+          const velBoost = clamp(legVel / 2.0, 0, 1.5);
+          const limbRun = legDrive * 0.70 + velBoost * 0.35 + armDrive * 0.25;
           const run = Math.max(trackedRun, limbRun, (Number(c.motion.energy) || 0) * 0.8, cadence * 0.35);
           target = clamp(run, 0, 1.0) * this.maxSpeed;
           if (s.stumble > 0) target *= 0.35;
         }
-        s.speed = damp(s.speed, target, s.stumble > 0 ? 10 : 6.2, dt);
+        s.speed = damp(s.speed, target, s.stumble > 0 ? 10 : 9.5, dt);
 
         if (!frozen && s.speed > 2 && c.motion.steps !== c._lastStepCount) {
           c._lastStepCount = c.motion.steps;
@@ -722,8 +726,104 @@ export class TrackGame extends BaseGame {
           }
         }
 
+        // Human athletic running kinematics & limb tracing
+        s.stridePhase += dt * Math.max(Number(c.motion.cadence || 0) * Math.PI * 2, (s.speed / 1.7) * Math.PI * 2);
+        const phase = s.stridePhase;
+        const speedNorm = clamp(s.speed / 9.0, 0, 1.2);
+
+        // 1. Vertical bounce of torso/pelvis
+        const bounce = Math.abs(Math.sin(phase)) * 0.05 * speedNorm;
+        let hipY = 0.82 - bounce;
+        const forwardLean = 0.08 + speedNorm * 0.14;
+
+        // 2. Real-time leg tracing from player's actual knee & leg lifts
+        const kneeLiftL = Number(c.motion.state?.kneeLiftL) || 0;
+        const kneeLiftR = Number(c.motion.state?.kneeLiftR) || 0;
+        const strideReach = 0.28 * speedNorm;
+        const strideKneeLift = 0.35 * speedNorm;
+
+        const legPhaseL = phase;
+        const legPhaseR = phase + Math.PI;
+
+        // Blend user's real leg raises with cadence stride kinematics
+        const knL_Z = Math.sin(legPhaseL) * strideReach + kneeLiftL * 0.16;
+        const knL_Y = 0.44 + Math.max(kneeLiftL * 0.40, Math.max(0, Math.sin(legPhaseL)) * strideKneeLift);
+        const anL_Z = Math.sin(legPhaseL - 0.35) * strideReach * 1.15 + kneeLiftL * 0.10;
+        const anL_Y = Math.max(0.04, 0.14 + Math.max(kneeLiftL * 0.36, Math.max(0, Math.sin(legPhaseL)) * strideKneeLift * 0.7));
+
+        const knR_Z = Math.sin(legPhaseR) * strideReach + kneeLiftR * 0.16;
+        const knR_Y = 0.44 + Math.max(kneeLiftR * 0.40, Math.max(0, Math.sin(legPhaseR)) * strideKneeLift);
+        const anR_Z = Math.sin(legPhaseR - 0.35) * strideReach * 1.15 + kneeLiftR * 0.10;
+        const anR_Y = Math.max(0.04, 0.14 + Math.max(kneeLiftR * 0.36, Math.max(0, Math.sin(legPhaseR)) * strideKneeLift * 0.7));
+
+        let ftL_Y = Math.max(0.04, anL_Y - 0.04);
+        let ftR_Y = Math.max(0.04, anR_Y - 0.04);
+        const ftL_Z = anL_Z + 0.08;
+        const ftR_Z = anR_Z + 0.08;
+
+        // Grounding contact: Ensure stance foot is pinned to the track (y = 0.04), never floating
+        const stanceY = Math.min(ftL_Y, ftR_Y);
+        if (stanceY > 0.04) {
+          const groundDiff = stanceY - 0.04;
+          hipY -= groundDiff;
+          ftL_Y -= groundDiff;
+          ftR_Y -= groundDiff;
+        }
+
+        // 3. Real-time arm tracing from player's hand movements
+        let wrL_Y, wrL_Z, wrR_Y, wrR_Z;
+        const lm = c.lm;
+        if (lm && lm[15] && lm[16] && lm[11] && lm[12]) {
+          const shL = lm[11], shR = lm[12], wrL = lm[15], wrR = lm[16];
+          const torsoSpan = Math.max(0.12, Math.abs((shL.y + shR.y) * 0.5 - (lm[23]?.y || 0.6)));
+          const pumpL = clamp((shL.y - wrL.y) / torsoSpan, -0.6, 0.9);
+          const pumpR = clamp((shR.y - wrR.y) / torsoSpan, -0.6, 0.9);
+          const reachL = clamp(-(wrL.z - (shL.z || 0)) * 1.5, -0.35, 0.35);
+          const reachR = clamp(-(wrR.z - (shR.z || 0)) * 1.5, -0.35, 0.35);
+
+          // Arm positions blending player's real wrist heights with forward sprint pumping
+          wrL_Y = 0.85 + pumpL * 0.24;
+          wrL_Z = pumpL * 0.26 + reachL * 0.22 + Math.sin(legPhaseR) * 0.12 * speedNorm;
+          wrR_Y = 0.85 + pumpR * 0.24;
+          wrR_Z = pumpR * 0.26 + reachR * 0.22 + Math.sin(legPhaseL) * 0.12 * speedNorm;
+        } else {
+          // Cadence arm pump fallback
+          const armSwing = 0.26 * speedNorm;
+          wrL_Z = Math.sin(legPhaseR) * armSwing;
+          wrL_Y = 0.85 + Math.sin(legPhaseR) * 0.14;
+          wrR_Z = Math.sin(legPhaseL) * armSwing;
+          wrR_Y = 0.85 + Math.sin(legPhaseL) * 0.14;
+        }
+
+        const torsoTwist = Math.sin(phase) * 0.06 * speedNorm;
+
+        c.avatar.update(null, { x: s.x, z: s.laneZ }, dt, {
+          poseTargets: {
+            hip: [0, hipY, 0],
+            neck: [0, hipY + 0.46, forwardLean],
+            head: [0, hipY + 0.65, forwardLean + 0.03],
+            shL: [-0.18 + torsoTwist, hipY + 0.42, forwardLean - torsoTwist],
+            shR: [0.18 - torsoTwist, hipY + 0.42, forwardLean + torsoTwist],
+            elL: [-0.22, hipY + 0.22, -wrL_Z * 0.4 - 0.05],
+            elR: [0.22, hipY + 0.22, -wrR_Z * 0.4 - 0.05],
+            wrL: [-0.20, wrL_Y, wrL_Z],
+            wrR: [0.20, wrR_Y, wrR_Z],
+            hipL: [-0.10, hipY, 0],
+            hipR: [0.10, hipY, 0],
+            knL: [-0.10, knL_Y, knL_Z],
+            knR: [0.10, knR_Y, knR_Z],
+            anL: [-0.10, anL_Y, anL_Z],
+            anR: [0.10, anR_Y, anR_Z],
+            ftL: [-0.10, ftL_Y, ftL_Z],
+            ftR: [0.10, ftR_Y, ftR_Z],
+          },
+          poseLambda: 26,
+        });
+
         // Place human avatar facing forward along track (+X)
-        this.place(c, s.x, s.laneZ, { y: effectiveJumpY, facing: Math.PI / 2 });
+        c.avatar.group.position.set(s.x, effectiveJumpY, s.laneZ);
+        c.avatar.facing = Math.PI / 2;
+        c.avatar.facingTarget = Math.PI / 2;
       } else {
         // --- OLYMPIC BOT AI KINEMATICS & STAMINA PROFILES ---
         if (!frozen && !s.finished) {

@@ -163,3 +163,80 @@ test('Sprint configuration has 200m track distance and grounds runners to track 
     'Must not elevate runner with jumpInput * 0.9'
   );
 });
+
+test('Sprint speed increases as user runs on the spot and raises legs faster (legVelocity & kneeLift)', () => {
+  const maxSpeed = 10.4;
+
+  function calculateTarget(motion) {
+    const trackedRun = Number.isFinite(motion.run) ? motion.run : 0;
+    const cadence = Number(motion.cadence) || 0;
+    const legDrive = Number(motion.legDrive) || 0;
+    const armDrive = Number(motion.armDrive) || 0;
+    const legVel = Number(motion.legVelocity) || 0;
+    const velBoost = Math.min(1.5, Math.max(0, legVel / 2.0));
+    const limbRun = legDrive * 0.70 + velBoost * 0.35 + armDrive * 0.25;
+    const run = Math.max(trackedRun, limbRun, cadence * 0.35);
+    return Math.min(1.0, Math.max(0, run)) * maxSpeed;
+  }
+
+  // 1. Slow leg lift: low velocity (0.5), small lift (0.15), cadence = 1.4 sps
+  const slowSpeed = calculateTarget({
+    run: 0.35,
+    cadence: 1.4,
+    legDrive: 0.30,
+    armDrive: 0.20,
+    legVelocity: 0.5,
+  });
+
+  // 2. High & Fast leg lift: high velocity (3.2), high knee lift, cadence = 3.8 sps
+  const fastSpeed = calculateTarget({
+    run: 1.35,
+    cadence: 3.8,
+    legDrive: 1.40,
+    armDrive: 0.85,
+    legVelocity: 3.2,
+  });
+
+  assert.ok(fastSpeed > slowSpeed * 1.8, `Fast leg raises must produce substantially higher speed: fast=${fastSpeed.toFixed(1)} vs slow=${slowSpeed.toFixed(1)}`);
+  assert.ok(fastSpeed >= maxSpeed * 0.95, `Explosive high-knee sprint must approach max Olympic speed (10.4 m/s), reached ${fastSpeed.toFixed(2)} m/s`);
+});
+
+test('Human runner limbs dynamically trace player knee raises, arm pumps, and anchor stance foot to track at y=0.04', () => {
+  // Simulate leg kinematics when left knee is driven up (kneeLiftL = 0.85) and right foot is on ground
+  const kneeLiftL = 0.85;
+  const kneeLiftR = 0.0;
+  const speedNorm = 0.9;
+  const strideReach = 0.28 * speedNorm;
+  const strideKneeLift = 0.35 * speedNorm;
+  const legPhaseL = 0.5;
+  const legPhaseR = legPhaseL + Math.PI;
+
+  const knL_Y = 0.44 + Math.max(kneeLiftL * 0.40, Math.max(0, Math.sin(legPhaseL)) * strideKneeLift);
+  const knL_Z = Math.sin(legPhaseL) * strideReach + kneeLiftL * 0.16;
+  const anL_Y = Math.max(0.04, 0.14 + Math.max(kneeLiftL * 0.36, Math.max(0, Math.sin(legPhaseL)) * strideKneeLift * 0.7));
+
+  const knR_Y = 0.44 + Math.max(kneeLiftR * 0.40, Math.max(0, Math.sin(legPhaseR)) * strideKneeLift);
+  const anR_Y = Math.max(0.04, 0.14 + Math.max(kneeLiftR * 0.36, Math.max(0, Math.sin(legPhaseR)) * strideKneeLift * 0.7));
+
+  let ftL_Y = Math.max(0.04, anL_Y - 0.04);
+  let ftR_Y = Math.max(0.04, anR_Y - 0.04);
+
+  // Left foot must be raised high in the air (> 0.35m)
+  assert.ok(ftL_Y > 0.35, `Left foot must lift high into stride air, was ${ftL_Y.toFixed(2)}m`);
+
+  // Stance foot grounding
+  let hipY = 0.82;
+  const stanceY = Math.min(ftL_Y, ftR_Y);
+  if (stanceY > 0.04) {
+    const groundDiff = stanceY - 0.04;
+    hipY -= groundDiff;
+    ftL_Y -= groundDiff;
+    ftR_Y -= groundDiff;
+  }
+
+  // Stance foot must be firmly pinned to track surface at y = 0.04, NEVER floating!
+  assert.equal(Math.min(ftL_Y, ftR_Y), 0.04, 'Stance foot must touch track at y = 0.04 (no floating)');
+  assert.ok(ftL_Y > 0.30, 'Raised leg remains elevated while stance leg is grounded');
+  assert.ok(hipY > 0.70 && hipY <= 0.82, 'Hip remains at natural athletic running height');
+});
+

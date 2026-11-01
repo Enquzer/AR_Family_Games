@@ -35,6 +35,9 @@ export class MotionTracker {
     this.waveLockUntil = 0;
     this.kickCooldown = { L: 0, R: 0 };
     this.prevAnkleY = { L: null, R: null };
+    this.prevKneeY = { L: null, R: null };
+    this.lastStepAt = 0;
+    this.instantCadence = 0;
     this.standingHipY = null; // anchored at wave-to-join, used for non-drifting duck
     this.handPrev = { L: null, R: null };
     this.prevHandSpeed = { L: 0, R: 0 };
@@ -102,6 +105,7 @@ export class MotionTracker {
       torsoTwist: 0,
       kneeLiftL: 0,
       kneeLiftR: 0,
+      legVelocity: 0,
       legDrive: 0,
       armDrive: 0,
       energy: 0,
@@ -137,6 +141,9 @@ export class MotionTracker {
     this.waveLockUntil = 0;
     this.kickCooldown = { L: 0, R: 0 };
     this.prevAnkleY = { L: null, R: null };
+    this.prevKneeY = { L: null, R: null };
+    this.lastStepAt = 0;
+    this.instantCadence = 0;
     this.standingHipY = null;
     this.handPrev = { L: null, R: null };
     this.prevHandSpeed = { L: 0, R: 0 };
@@ -543,26 +550,58 @@ export class MotionTracker {
     const legLiftL = Math.max(liftL, kneeLiftL * 0.85);
     const legLiftR = Math.max(liftR, kneeLiftR * 0.85);
     const stepThreshold = 0.032;
+
+    // Upward leg lift velocities (how fast the knee/leg is raised)
+    const anLVelY = this.prevAnkleY.L != null ? Math.max(0, (this.prevAnkleY.L - anL.y) / Math.max(dt, 0.01) / bodyH) : 0;
+    const anRVelY = this.prevAnkleY.R != null ? Math.max(0, (this.prevAnkleY.R - anR.y) / Math.max(dt, 0.01) / bodyH) : 0;
+    const knLVelY = this.prevKneeY.L != null ? Math.max(0, (this.prevKneeY.L - knL.y) / Math.max(dt, 0.01) / bodyH) : 0;
+    const knRVelY = this.prevKneeY.R != null ? Math.max(0, (this.prevKneeY.R - knR.y) / Math.max(dt, 0.01) / bodyH) : 0;
+    this.prevKneeY.L = knL.y;
+    this.prevKneeY.R = knR.y;
+    const legVelInstant = Math.max(knLVelY, knRVelY, anLVelY * 0.85, anRVelY * 0.85);
+    s.legVelocity = damp(s.legVelocity || 0, legVelInstant, 12, dt);
+
     if (legLiftL > stepThreshold && !prev?.liftLUp) {
+      if (this.lastStepAt > 0) {
+        const stepInterval = (now - this.lastStepAt) / 1000;
+        if (stepInterval >= 0.12 && stepInterval <= 1.2) {
+          const instCadence = clamp(1.0 / stepInterval, 1.0, 6.0);
+          this.instantCadence = damp(this.instantCadence || 0, instCadence, 14, dt);
+        }
+      }
+      this.lastStepAt = now;
       this.stepTimes.push(now);
       s.steps++;
     }
     if (legLiftR > stepThreshold && !prev?.liftRUp) {
+      if (this.lastStepAt > 0) {
+        const stepInterval = (now - this.lastStepAt) / 1000;
+        if (stepInterval >= 0.12 && stepInterval <= 1.2) {
+          const instCadence = clamp(1.0 / stepInterval, 1.0, 6.0);
+          this.instantCadence = damp(this.instantCadence || 0, instCadence, 14, dt);
+        }
+      }
+      this.lastStepAt = now;
       this.stepTimes.push(now);
       s.steps++;
+    }
+    if (now - this.lastStepAt > 900) {
+      this.instantCadence = damp(this.instantCadence || 0, 0, 6, dt);
     }
     const liftLUp = prev?.liftLUp ? legLiftL > stepThreshold * 0.58 : legLiftL > stepThreshold;
     const liftRUp = prev?.liftRUp ? legLiftR > stepThreshold * 0.58 : legLiftR > stepThreshold;
 
     this.stepTimes = this.stepTimes.filter((t) => now - t < 2400);
-    s.cadence = this.stepTimes.length / 2.4;
+    const windowCadence = this.stepTimes.length / 2.4;
+    s.cadence = Math.max(windowCadence, this.instantCadence || 0);
     s.kneeLiftL = clamp(kneeLiftL / 0.18, 0, 1);
     s.kneeLiftR = clamp(kneeLiftR / 0.18, 0, 1);
 
+    const velBoost = clamp(s.legVelocity / 2.0, 0, 1.5);
     const legDrive = clamp(
-      (Math.max(legLiftL, legLiftR) * 3.2 + Math.abs(legLiftL - legLiftR) * 1.4) / 0.45,
+      ((Math.max(legLiftL, legLiftR) * 3.4 + Math.abs(legLiftL - legLiftR) * 1.6) / 0.40) * (0.65 + velBoost * 0.55),
       0,
-      1.4
+      1.6
     );
     const armDrive = clamp(
       ((verticalL + verticalR) * 0.55 + Math.abs(verticalL - verticalR) * 0.35) / 2.2,
@@ -570,15 +609,15 @@ export class MotionTracker {
       1.2
     );
     const bodyBob = clamp(speedOf(hip, prev?.hip) / 2.4, 0, 1);
-    const cadenceDrive = clamp(s.cadence / 2.8, 0, 1.35);
+    const cadenceDrive = clamp(s.cadence / 2.8, 0, 1.4);
     s.legDrive = legDrive;
     s.armDrive = armDrive;
     const runTarget = clamp(
-      Math.max(cadenceDrive, legDrive * 0.72 + armDrive * 0.36 + bodyBob * 0.22),
+      Math.max(cadenceDrive, legDrive * 0.78 + armDrive * 0.34 + bodyBob * 0.20, (cadenceDrive + legDrive) * 0.58),
       0,
-      1.45
+      1.55
     );
-    s.run = damp(s.run, runTarget, 8, dt);
+    s.run = damp(s.run, runTarget, 10, dt);
 
     /* ---------------- jump ---------------- */
     const bothLift = Math.min(Math.max(liftL, kneeLiftL * 0.7), Math.max(liftR, kneeLiftR * 0.7));
@@ -593,8 +632,6 @@ export class MotionTracker {
 
     /* ---------------- kick detection ---------------- */
     const KICK_VEL_THRESH = CONFIG.motion?.kick?.velThreshold || 1.7;
-    const anLVelY = this.prevAnkleY.L != null ? (this.prevAnkleY.L - anL.y) / Math.max(dt, 0.01) / bodyH : 0;
-    const anRVelY = this.prevAnkleY.R != null ? (this.prevAnkleY.R - anR.y) / Math.max(dt, 0.01) / bodyH : 0;
     const kickCooldownMs = CONFIG.motion?.kick?.cooldownMs || 480;
 
     if (anLVelY > KICK_VEL_THRESH && anRVelY < KICK_VEL_THRESH * 0.5 && !this.airborne && now - this.kickCooldown.L > kickCooldownMs) {
@@ -790,6 +827,7 @@ export class MotionTracker {
   get kickR() { return this.state.kickR; }
   get energy() { return this.state.energy; }
   get legDrive() { return this.state.legDrive; }
+  get legVelocity() { return this.state.legVelocity || 0; }
   get armDrive() { return this.state.armDrive; }
   get kneeLiftL() { return this.state.kneeLiftL; }
   get kneeLiftR() { return this.state.kneeLiftR; }

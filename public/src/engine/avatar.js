@@ -767,8 +767,25 @@ export class Avatar {
       this.target.ftL.set(-0.14, 0.16, 0.6);
       this.target.ftR.set(0.14, 0.16, 0.6);
     } else {
-      // Foot planting state machine (prevents jitter / foot skating)
+      // Grounding contact alignment: ensure stance foot firmly rests on FLOOR_Y (0.04)
+      // and never floats in mid-air unless the user is jumping
       const FLOOR_Y = 0.04;
+      if (!opts.inAir) {
+        const minFootY = Math.min(
+          this.target.ftL.y,
+          this.target.ftR.y,
+          this.target.anL.y - 0.03,
+          this.target.anR.y - 0.03
+        );
+        const floorDelta = minFootY - FLOOR_Y;
+        if (Math.abs(floorDelta) > 0.002) {
+          for (const k of Object.keys(this.target)) {
+            this.target[k].y -= floorDelta;
+          }
+        }
+      }
+
+      // Foot planting state machine (prevents jitter / foot skating)
       const updateFootPlant = (side, targetFoot, targetAnkle) => {
         const fp = this.footPlant[side];
         const speed = targetFoot.distanceTo(fp.prevPos);
